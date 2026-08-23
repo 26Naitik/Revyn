@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
-export const PAYMENT_LINK_ELIGIBLE_STRATEGIES: ReadonlySet<string> = new Set([
-  "send_payment_link",
-  "offer_discount",
-]);
+export {
+  PAYMENT_LINK_ELIGIBLE_STRATEGIES,
+  isPaymentLinkEligible,
+} from "@/lib/recovery-eligibility";
 
 export interface RecoveryRow {
   recoveryId: string;
@@ -17,6 +17,8 @@ export interface RecoveryRow {
   razorpayActionId: string | null;
   amountRecovered: number;
   createdAt: Date;
+  customerName: string | null;
+  customerEmail: string | null;
 }
 
 export interface RiskRow {
@@ -28,6 +30,8 @@ export interface RiskRow {
   rootCause: string | null;
   confidenceScore: number;
   createdAt: Date;
+  customerName: string | null;
+  customerEmail: string | null;
 }
 
 export interface ActivityRow {
@@ -37,16 +41,6 @@ export interface ActivityRow {
   status: string;
   details: Record<string, unknown>;
   createdAt: Date;
-}
-
-export function isPaymentLinkEligible(row: {
-  status: string;
-  strategy: string;
-}): boolean {
-  return (
-    row.status === "pending" &&
-    PAYMENT_LINK_ELIGIBLE_STRATEGIES.has(row.strategy)
-  );
 }
 
 export function parseAuditDetails(raw: string): Record<string, unknown> {
@@ -59,6 +53,27 @@ export function parseAuditDetails(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+const ENTITY_WITH_CUSTOMER_SELECT = {
+  select: {
+    customer: {
+      select: {
+        name: true,
+        email: true,
+      },
+    },
+  },
+} as const;
+
+type CustomerRef = { name: string; email: string } | null;
+
+function firstCustomer(
+  payment: { customer: CustomerRef } | null,
+  order: { customer: CustomerRef } | null,
+  subscription: { customer: CustomerRef } | null
+): CustomerRef {
+  return payment?.customer ?? order?.customer ?? subscription?.customer ?? null;
 }
 
 export async function listRecentRecoveries(
@@ -75,42 +90,70 @@ export async function listRecentRecoveries(
           amountAtRisk: true,
           currency: true,
           rootCause: true,
+          payment: ENTITY_WITH_CUSTOMER_SELECT,
+          order: ENTITY_WITH_CUSTOMER_SELECT,
+          subscription: ENTITY_WITH_CUSTOMER_SELECT,
         },
       },
     },
   });
 
-  return workflows.map((wf) => ({
-    recoveryId: wf.id,
-    strategy: wf.strategy,
-    status: wf.status,
-    riskId: wf.revenueRisk.id,
-    riskType: wf.revenueRisk.type,
-    amountAtRisk: wf.revenueRisk.amountAtRisk,
-    currency: wf.revenueRisk.currency,
-    rootCause: wf.revenueRisk.rootCause,
-    razorpayActionId: wf.razorpayActionId,
-    amountRecovered: wf.amountRecovered,
-    createdAt: wf.createdAt,
-  }));
+  return workflows.map((wf) => {
+    const customer = firstCustomer(
+      wf.revenueRisk.payment,
+      wf.revenueRisk.order,
+      wf.revenueRisk.subscription
+    );
+
+    return {
+      recoveryId: wf.id,
+      strategy: wf.strategy,
+      status: wf.status,
+      riskId: wf.revenueRisk.id,
+      riskType: wf.revenueRisk.type,
+      amountAtRisk: wf.revenueRisk.amountAtRisk,
+      currency: wf.revenueRisk.currency,
+      rootCause: wf.revenueRisk.rootCause,
+      razorpayActionId: wf.razorpayActionId,
+      amountRecovered: wf.amountRecovered,
+      createdAt: wf.createdAt,
+      customerName: customer?.name ?? null,
+      customerEmail: customer?.email ?? null,
+    };
+  });
 }
 
 export async function listRecentRisks(limit = 50): Promise<RiskRow[]> {
   const risks = await prisma.revenueAtRisk.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
+    include: {
+      payment: ENTITY_WITH_CUSTOMER_SELECT,
+      order: ENTITY_WITH_CUSTOMER_SELECT,
+      subscription: ENTITY_WITH_CUSTOMER_SELECT,
+    },
   });
 
-  return risks.map((risk) => ({
-    id: risk.id,
-    type: risk.type,
-    amountAtRisk: risk.amountAtRisk,
-    currency: risk.currency,
-    status: risk.status,
-    rootCause: risk.rootCause,
-    confidenceScore: risk.confidenceScore,
-    createdAt: risk.createdAt,
-  }));
+  return risks.map((risk) => {
+    const customer = firstCustomer(
+      risk.payment,
+      risk.order,
+      risk.subscription
+    );
+
+    return {
+      id: risk.id,
+      type: risk.type,
+      amountAtRisk: risk.amountAtRisk,
+      currency: risk.currency,
+      status: risk.status,
+      rootCause: risk.rootCause,
+      confidenceScore: risk.confidenceScore,
+      createdAt: risk.createdAt,
+      customerName: customer?.name ?? null,
+      customerEmail: customer?.email ?? null,
+    };
+  });
 }
 
 export async function getRecentActivity(limit = 10): Promise<ActivityRow[]> {

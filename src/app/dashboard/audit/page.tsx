@@ -1,48 +1,118 @@
 import { Header } from "@/components/layout/Header";
-import { EmptyState, ErrorPanel } from "@/components/dashboard/states";
+import { ErrorState } from "@/components/ui/states";
+import { TableShell, Td, Th, Tr } from "@/components/ui/Table";
 import { getRecentActivity, type ActivityRow } from "@/lib/dashboard/data";
-import { formatDateTime, statusBadgeClass } from "@/lib/format";
+import { formatDateTime, formatRelativeTime, shortRef } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const AUDIT_COLUMNS = ["Action", "Actor", "Status", "Details", "When"];
+const EVENT_LABELS: Record<string, string> = {
+  detect: "Risk detected",
+  diagnose: "Diagnosis completed",
+  decide: "Recovery strategy selected",
+  recover: "Recovery action executed",
+  measure: "Recovery measured",
+  guardrail_block: "Guardrail triggered",
+  guardrail_warn: "Guardrail warning",
+  webhook: "Razorpay webhook",
+  error: "System error",
+};
+
+const EVENT_DOT_CLASSES: Record<string, string> = {
+  detect: "bg-warning",
+  diagnose: "bg-sky-500",
+  decide: "bg-indigo-500",
+  recover: "bg-brand",
+  measure: "bg-faint",
+  guardrail_block: "bg-danger",
+  guardrail_warn: "bg-orange-400",
+  webhook: "bg-brand-dark",
+  error: "bg-red-600",
+};
+
+const ACTOR_LABELS: Record<string, string> = {
+  system: "system",
+  ai_agent: "ai_agent",
+  razorpay_webhook: "razorpay_webhook",
+  user: "operator",
+};
+
+function entityOf(row: ActivityRow): string {
+  const d = row.details;
+  const candidate =
+    d.recoveryId ??
+    d.riskId ??
+    d.paymentLinkId ??
+    d.linkId ??
+    null;
+  return typeof candidate === "string" && candidate
+    ? shortRef(candidate)
+    : "—";
+}
 
 function AuditTable({ rows }: { rows: ActivityRow[] }) {
+  const now = new Date();
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-gray-200 text-sm">
-        <thead className="bg-gray-50">
-          <tr>
-            {AUDIT_COLUMNS.map((col) => (
-              <th key={col} className="px-4 py-3 text-left font-medium text-gray-500">
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {rows.map((row) => (
-            <tr key={row.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium text-gray-900">{row.action}</td>
-              <td className="px-4 py-3 text-gray-600">{row.actor}</td>
-              <td className="px-4 py-3">
+    <TableShell minWidth={880}>
+      <thead>
+        <tr>
+          <Th>Time</Th>
+          <Th>Event</Th>
+          <Th>Entity</Th>
+          <Th>Actor</Th>
+          <Th>Details</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <Tr key={row.id}>
+            <Td className="whitespace-nowrap">
+              <p className="text-[13px] font-medium leading-5 text-ink">
+                {formatRelativeTime(row.createdAt, now)}
+              </p>
+              <p className="text-[11px] leading-4 text-faint">
+                {formatDateTime(row.createdAt)}
+              </p>
+            </Td>
+            <Td>
+              <span className="flex items-center gap-2 font-medium text-ink">
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(row.status === "success" ? "succeeded" : row.status)}`}
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    EVENT_DOT_CLASSES[row.action] ?? "bg-faint"
+                  }`}
+                />
+                {EVENT_LABELS[row.action] ?? row.action}
+              </span>
+              {row.status !== "success" && (
+                <span
+                  className={`mt-0.5 block text-[11px] font-medium ${
+                    row.status === "warning" ? "text-warning" : "text-danger"
+                  }`}
                 >
                   {row.status}
                 </span>
-              </td>
-              <td className="max-w-[420px] truncate px-4 py-3 font-mono text-xs text-gray-500">
+              )}
+            </Td>
+            <Td className="font-mono text-xs text-muted">{entityOf(row)}</Td>
+            <Td>
+              <span className="rounded-md border border-line bg-canvas px-1.5 py-0.5 font-mono text-[11px] text-muted">
+                {ACTOR_LABELS[row.actor] ?? row.actor}
+              </span>
+            </Td>
+            <Td className="max-w-[420px]">
+              <p
+                className="truncate font-mono text-[11px] leading-5 text-muted"
+                title={JSON.stringify(row.details)}
+              >
                 {JSON.stringify(row.details)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
-                {formatDateTime(row.createdAt)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              </p>
+            </Td>
+          </Tr>
+        ))}
+      </tbody>
+    </TableShell>
   );
 }
 
@@ -59,29 +129,44 @@ export default async function AuditPage() {
     return (
       <>
         <Header title="Audit Trail" />
-        <div className="p-6">
-          <ErrorPanel message="Check that PostgreSQL is running and DATABASE_URL is configured, then refresh this page." />
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
+          <ErrorState message="Revyn couldn't reach the recovery database. Check that PostgreSQL is running and DATABASE_URL is configured." />
         </div>
       </>
     );
   }
 
+  const failures = rows.filter((r) => r.status !== "success").length;
+
   return (
     <>
-      <Header title="Audit Trail" />
-      <div className="p-6">
-        {rows.length === 0 ? (
-          <EmptyState
-            title="No audit entries yet"
-            hint="Every detect, diagnose, decide, recover, guardrail and webhook event is recorded here with a full trail."
-          />
-        ) : (
-          <>
-            <p className="mb-3 text-xs text-gray-500">
-              Showing the {rows.length} most recent entries (newest first).
+      <Header
+        title="Audit Trail"
+        description="Immutable record of every engine decision, action and webhook."
+      />
+      <div className="animate-fade-in px-4 pb-10 pt-6 sm:px-6 lg:px-8">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted">
+            Showing the {rows.length} most recent entries · newest first
+          </p>
+          {failures > 0 && (
+            <p className="text-xs text-danger">
+              {failures} entr{failures === 1 ? "y" : "ies"} need attention
             </p>
-            <AuditTable rows={rows} />
-          </>
+          )}
+        </div>
+        {rows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-line-strong bg-surface px-6 py-14 text-center">
+            <p className="text-[15px] font-semibold text-ink">
+              No audit entries yet
+            </p>
+            <p className="mx-auto mt-1 max-w-sm text-[13px] leading-5 text-muted">
+              Every detect, diagnose, decide, recover, guardrail and webhook
+              event is recorded here with a full trail.
+            </p>
+          </div>
+        ) : (
+          <AuditTable rows={rows} />
         )}
       </div>
     </>

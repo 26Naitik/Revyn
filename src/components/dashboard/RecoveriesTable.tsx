@@ -1,94 +1,91 @@
 import { CreatePaymentLinkButton } from "@/components/dashboard/CreatePaymentLinkButton";
 import { isPaymentLinkEligible, type RecoveryRow } from "@/lib/dashboard/data";
+import { Badge } from "@/components/ui/Badge";
 import {
-  formatINR,
-  labelRiskType,
-  labelStrategy,
-  statusBadgeClass,
-} from "@/lib/format";
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(status)}`}
-    >
-      {status}
-    </span>
-  );
-}
+  TableShell,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/Table";
+import { formatINR, labelRiskType, labelStrategy } from "@/lib/format";
+import { EmptyState } from "@/components/ui/states";
+import { IconSend } from "@/components/ui/icons";
 
 export function RecoveriesTable({ rows }: { rows: RecoveryRow[] }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center">
-        <p className="text-sm font-medium text-gray-900">No recoveries yet</p>
-        <p className="mt-1 text-sm text-gray-500">
-          Run the detection pipeline to find revenue at risk. Eligible risks
-          will get a decided recovery strategy here.
-        </p>
+      <div className="rounded-xl border border-dashed border-line-strong bg-surface">
+        <EmptyState
+          icon={<IconSend className="h-5 w-5" />}
+          title="No recovery workflows yet"
+          hint="Run a recovery scan to find revenue at risk. Decided risks appear here and eligible ones can be executed as Razorpay payment links."
+        />
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-gray-200 text-sm">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Root cause</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Strategy</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Amount</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-            <th className="px-4 py-3 text-right font-medium text-gray-500">Action</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {rows.map((row) => {
-            const eligible = isPaymentLinkEligible(row);
+    <TableShell minWidth={860}>
+      <thead>
+        <tr>
+          <Th>Type</Th>
+          <Th>Root cause</Th>
+          <Th>Strategy</Th>
+          <Th>Amount</Th>
+          <Th>Status</Th>
+          <Th align="right">Action</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const eligible = isPaymentLinkEligible(row);
 
-            return (
-              <tr key={row.recoveryId} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-900">
-                  {labelRiskType(row.riskType)}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                  {row.rootCause ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-gray-700">
+          return (
+            <Tr key={row.recoveryId}>
+              <Td className="font-medium text-ink">
+                {labelRiskType(row.riskType)}
+              </Td>
+              <Td className="max-w-[220px] truncate font-mono text-xs text-muted" title={row.rootCause ?? undefined}>
+                {row.rootCause ?? "—"}
+              </Td>
+              <Td>
+                <span className="inline-flex items-center gap-1.5 text-muted">
                   {labelStrategy(row.strategy)}
                   {row.strategy === "escalate_human" && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-600/20">
+                    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 ring-1 ring-inset ring-violet-600/20">
                       manual
                     </span>
                   )}
-                </td>
-                <td className="px-4 py-3 font-medium text-gray-900">
-                  {formatINR(row.amountAtRisk)}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={row.status} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {eligible ? (
-                    <CreatePaymentLinkButton recoveryId={row.recoveryId} />
-                  ) : row.status === "executing" && row.razorpayActionId ? (
-                    <span className="text-xs text-gray-400" title={row.razorpayActionId}>
-                      Awaiting payment…
-                    </span>
-                  ) : row.status === "succeeded" ? (
-                    <span className="text-xs text-emerald-600">
-                      {formatINR(row.amountRecovered)} recovered
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-400">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                </span>
+              </Td>
+              <Td className="font-semibold text-ink tabular-nums">
+                {formatINR(row.amountAtRisk)}
+              </Td>
+              <Td>
+                <Badge status={row.status} />
+              </Td>
+              <Td align="right">
+                {eligible ? (
+                  <CreatePaymentLinkButton recoveryId={row.recoveryId} />
+                ) : row.status === "executing" && row.razorpayActionId ? (
+                  <span
+                    className="text-xs text-faint"
+                    title={row.razorpayActionId}
+                  >
+                    Awaiting payment…
+                  </span>
+                ) : row.status === "succeeded" ? (
+                  <span className="text-xs font-medium text-brand-dark">
+                    {formatINR(row.amountRecovered)} recovered
+                  </span>
+                ) : (
+                  <span className="text-xs text-faint">—</span>
+                )}
+              </Td>
+            </Tr>
+          );
+        })}
+      </tbody>
+    </TableShell>
   );
 }

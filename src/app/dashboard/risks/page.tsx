@@ -1,55 +1,47 @@
 import { Header } from "@/components/layout/Header";
-import { EmptyState, ErrorPanel } from "@/components/dashboard/states";
+import {
+  RisksExplorer,
+  type RiskViewRow,
+} from "@/components/dashboard/RisksExplorer";
+import { ErrorState } from "@/components/ui/states";
 import { listRecentRisks, type RiskRow } from "@/lib/dashboard/data";
-import { formatINR, formatDateTime, labelRiskType } from "@/lib/format";
-import { statusBadgeClass } from "@/lib/format";
+import {
+  formatDateTime,
+  formatINR,
+  formatRelativeTime,
+  labelRiskType,
+} from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const RISK_COLUMNS = ["Type", "Amount", "Status", "Root cause", "Confidence", "Detected"];
+function severityOf(row: RiskRow): RiskViewRow["severity"] {
+  if (row.confidenceScore >= 0.75 || row.amountAtRisk >= 5_000_000) {
+    return "high";
+  }
+  if (row.confidenceScore >= 0.4 || row.amountAtRisk >= 1_000_000) {
+    return "medium";
+  }
+  return "low";
+}
 
-function RisksTable({ rows }: { rows: RiskRow[] }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-gray-200 text-sm">
-        <thead className="bg-gray-50">
-          <tr>
-            {RISK_COLUMNS.map((col) => (
-              <th key={col} className="px-4 py-3 text-left font-medium text-gray-500">
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {rows.map((row) => (
-            <tr key={row.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 text-gray-900">{labelRiskType(row.type)}</td>
-              <td className="px-4 py-3 font-medium text-gray-900">
-                {formatINR(row.amountAtRisk)}
-              </td>
-              <td className="px-4 py-3">
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(row.status)}`}
-                >
-                  {row.status}
-                </span>
-              </td>
-              <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                {row.rootCause ?? "—"}
-              </td>
-              <td className="px-4 py-3 text-gray-600">
-                {row.confidenceScore > 0 ? `${Math.round(row.confidenceScore * 100)}%` : "—"}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
-                {formatDateTime(row.createdAt)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+function toViewRow(row: RiskRow, now: Date): RiskViewRow {
+  return {
+    id: row.id,
+    type: row.type,
+    typeLabel: labelRiskType(row.type),
+    amountLabel: formatINR(row.amountAtRisk),
+    detectedLabel: formatRelativeTime(row.createdAt, now),
+    detectedFull: formatDateTime(row.createdAt),
+    confidencePercent:
+      row.confidenceScore > 0
+        ? Math.round(row.confidenceScore * 100)
+        : 0,
+    status: row.status,
+    rootCause: row.rootCause,
+    customerName: row.customerName,
+    customerEmail: row.customerEmail,
+    severity: severityOf(row),
+  };
 }
 
 export default async function RisksPage() {
@@ -65,25 +57,23 @@ export default async function RisksPage() {
     return (
       <>
         <Header title="Revenue at Risk" />
-        <div className="p-6">
-          <ErrorPanel message="Check that PostgreSQL is running and DATABASE_URL is configured, then refresh this page." />
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
+          <ErrorState message="Revyn couldn't reach the recovery database. Check that PostgreSQL is running and DATABASE_URL is configured." />
         </div>
       </>
     );
   }
 
+  const now = new Date();
+
   return (
     <>
-      <Header title="Revenue at Risk" />
-      <div className="p-6">
-        {rows.length === 0 ? (
-          <EmptyState
-            title="No revenue at risk detected yet"
-            hint='Use the "Run detection pipeline" button on the dashboard to scan for failed payments, abandoned checkouts, failed subscriptions and overdue receivables.'
-          />
-        ) : (
-          <RisksTable rows={rows} />
-        )}
+      <Header
+        title="Revenue at Risk"
+        description="Every detected risk across failed payments, checkouts, subscriptions and receivables."
+      />
+      <div className="animate-fade-in px-4 pb-10 pt-6 sm:px-6 lg:px-8">
+        <RisksExplorer rows={rows.map((row) => toViewRow(row, now))} />
       </div>
     </>
   );

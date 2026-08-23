@@ -2,6 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import {
+  IconBolt,
+  IconCheckCircle,
+  IconXCircle,
+} from "@/components/ui/icons";
 
 interface PipelineSummary {
   detected: number;
@@ -16,7 +22,7 @@ type RunState =
   | { phase: "done"; summary: PipelineSummary }
   | { phase: "error"; message: string };
 
-export function RunPipelineButton() {
+export function RunPipelineButton({ size = "md" }: { size?: "sm" | "md" }) {
   const router = useRouter();
   const [state, setState] = useState<RunState>({ phase: "idle" });
   const [isPending, startTransition] = useTransition();
@@ -52,33 +58,36 @@ export function RunPipelineButton() {
     }
   }
 
+  const running = state.phase === "running" || isPending;
+
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
       {state.phase === "running" && (
-        <span className="text-sm text-gray-500">Scanning for revenue at risk…</span>
+        <span className="flex items-center gap-1.5 text-[13px] text-muted">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-brand" />
+          Scanning for revenue at risk…
+        </span>
       )}
       {state.phase === "done" && (
-        <span
-          className="text-sm text-emerald-700"
-          role="status"
-        >
+        <span className="flex items-center gap-1.5 text-[13px] text-brand-dark" role="status">
+          <IconCheckCircle className="h-3.5 w-3.5 shrink-0" />
           Detected {state.summary.detected} · diagnosed{" "}
           {state.summary.diagnosed} · decided {state.summary.decided}
         </span>
       )}
       {state.phase === "error" && (
-        <span className="text-sm text-red-600" role="alert">
+        <span
+          className="flex items-center gap-1.5 text-[13px] text-danger"
+          role="alert"
+        >
+          <IconXCircle className="h-3.5 w-3.5 shrink-0" />
           {state.message}
         </span>
       )}
-      <button
-        type="button"
-        onClick={runPipeline}
-        disabled={state.phase === "running" || isPending}
-        className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-emerald-300"
-      >
-        {state.phase === "running" || isPending ? "Running…" : "Run detection pipeline"}
-      </button>
+      <Button onClick={runPipeline} disabled={running} size={size}>
+        <IconBolt className={`h-4 w-4 ${running ? "animate-pulse" : ""}`} />
+        {running ? "Running…" : "Run Recovery Scan"}
+      </Button>
     </div>
   );
 }

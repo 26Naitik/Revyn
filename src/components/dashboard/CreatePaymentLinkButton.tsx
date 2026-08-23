@@ -2,6 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import {
+  IconArrowUpRight,
+  IconSend,
+  IconXCircle,
+} from "@/components/ui/icons";
 
 interface CreatedLink {
   linkId: string;
@@ -66,11 +72,12 @@ export function CreatePaymentLinkButton({ recoveryId }: { recoveryId: string }) 
           href={state.link.shortUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center rounded-md bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 hover:bg-emerald-100"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-soft px-2.5 py-1.5 text-[13px] font-medium text-brand-dark ring-1 ring-inset ring-brand/20 transition-colors hover:bg-green-100"
         >
-          Open payment link ↗
+          Open payment link
+          <IconArrowUpRight className="h-3.5 w-3.5" />
         </a>
-        <span className="font-mono text-xs text-gray-400">
+        <span className="max-w-[160px] truncate font-mono text-[11px] text-faint">
           {state.link.linkId}
         </span>
       </div>
@@ -79,16 +86,22 @@ export function CreatePaymentLinkButton({ recoveryId }: { recoveryId: string }) 
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <button
-        type="button"
+      <Button
+        size="sm"
         onClick={createLink}
         disabled={state.phase === "creating" || isPending}
-        className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-emerald-300"
       >
+        <IconSend
+          className={`h-3.5 w-3.5 ${state.phase === "creating" ? "animate-pulse" : ""}`}
+        />
         {state.phase === "creating" || isPending ? "Creating…" : "Create payment link"}
-      </button>
+      </Button>
       {state.phase === "error" && (
-        <span className="max-w-[220px] text-xs text-red-600" role="alert">
+        <span
+          className="flex max-w-[220px] items-start gap-1 text-xs leading-4 text-danger"
+          role="alert"
+        >
+          <IconXCircle className="mt-px h-3.5 w-3.5 shrink-0" />
           {state.message}
         </span>
       )}

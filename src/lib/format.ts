@@ -15,6 +15,75 @@ export function formatPercent(fraction: number): string {
   return `${(fraction * 100).toFixed(1)}%`;
 }
 
+export function formatINRCompact(amountPaise: number): string {
+  if (!Number.isFinite(amountPaise)) return "₹0";
+
+  const rupees = amountPaise / 100;
+  const abs = Math.abs(rupees);
+
+  if (abs >= 1_00_00_000) {
+    const cr = rupees / 1_00_00_000;
+    return `₹${trimZeros(cr.toFixed(2))}Cr`;
+  }
+  if (abs >= 1_00_000) {
+    const lakh = rupees / 1_00_000;
+    return `₹${trimZeros(lakh.toFixed(2))}L`;
+  }
+  if (abs >= 1_000) {
+    const k = rupees / 1_000;
+    return `₹${trimZeros(k.toFixed(1))}K`;
+  }
+  return `₹${Math.round(rupees)}`;
+}
+
+function trimZeros(value: string): string {
+  return value.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+export function formatRelativeTime(date: Date, now = new Date()): string {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  const diffMs = now.getTime() - date.getTime();
+  const past = diffMs >= 0;
+  const diffMin = Math.floor(Math.abs(diffMs) / 60_000);
+
+  let label: string;
+  if (diffMin < 1) label = "just now";
+  else if (diffMin < 60) label = `${diffMin}m`;
+  else if (diffMin < 24 * 60) label = `${Math.floor(diffMin / 60)}h`;
+  else if (diffMin < 30 * 24 * 60) label = `${Math.floor(diffMin / (24 * 60))}d`;
+  else return formatDateTime(date);
+
+  if (label === "just now") return label;
+  return past ? `${label} ago` : `in ${label}`;
+}
+
+const REF_PREFIXES: Array<[RegExp, string]> = [
+  [/^risk_/i, "RSK"],
+  [/^rec_/i, "REC"],
+  [/^paylink_/i, "LNK"],
+  [/^link_/i, "LNK"],
+];
+
+export function shortRef(id: string | null | undefined): string {
+  if (!id) return "—";
+  const clean = id.trim();
+  if (!clean) return "—";
+
+  let prefix = "REF";
+  for (const [pattern, tag] of REF_PREFIXES) {
+    if (pattern.test(clean)) {
+      prefix = tag;
+      break;
+    }
+  }
+
+  const tail = clean.slice(-6).toUpperCase();
+  return `${prefix}·${tail}`;
+}
+
 export const RISK_TYPE_LABELS: Record<string, string> = {
   failed_payment: "Failed payment",
   abandoned_checkout: "Abandoned checkout",

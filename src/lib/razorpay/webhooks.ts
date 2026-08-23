@@ -302,13 +302,24 @@ export async function handleRazorpayWebhook(
         };
     }
   } catch (err) {
-    console.error(
-      "Failed to process Razorpay webhook:",
-      err instanceof Error ? err.message : err
-    );
-    return {
-      status: 500,
-      body: { error: "webhook_processing_failed" },
-    };
+  console.error("========== RAZORPAY WEBHOOK ERROR ==========");
+  console.error(err);
+  console.error(
+    "Message:",
+    err instanceof Error ? err.message : String(err)
+  );
+  console.error(
+    "Stack:",
+    err instanceof Error ? err.stack : "No stack available"
+  );
+  console.error("============================================");
+
+  return {
+    status: 500,
+    body: {
+      error: "webhook_processing_failed",
+      message: err instanceof Error ? err.message : String(err),
+    },
+  };
   }
 }

@@ -1,18 +1,25 @@
 export default function DashboardLoading() {
   return (
-    <div className="animate-pulse p-6">
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="px-4 pb-10 pt-6 sm:px-6 lg:px-8" aria-busy="true">
+      <div className="h-9 w-64 animate-pulse rounded-lg bg-line/60" />
+      <div className="mt-2 h-4 w-80 animate-pulse rounded bg-line/40" />
+
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-28 rounded-lg border border-gray-200 bg-white" />
+          <div
+            key={i}
+            className="h-[118px] animate-pulse rounded-xl border border-line bg-surface"
+            style={{ animationDelay: `${i * 90}ms` }}
+          />
         ))}
       </div>
-      <div className="mt-8 h-24 rounded-lg border border-gray-200 bg-white" />
-      <div className="mt-8 h-10 w-56 rounded bg-gray-200" />
-      <div className="mt-3 space-y-2">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-12 rounded-md border border-gray-100 bg-gray-50" />
-        ))}
+
+      <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="h-[360px] animate-pulse rounded-xl border border-line bg-surface xl:col-span-2" />
+        <div className="h-[360px] animate-pulse rounded-xl border border-line bg-surface" />
       </div>
+
+      <div className="mt-6 h-[180px] animate-pulse rounded-xl border border-line bg-surface" />
     </div>
   );
 }

@@ -1,27 +1,38 @@
 import type { ActivityRow } from "@/lib/dashboard/data";
+import { Card, CardHeader } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/states";
+import { formatRelativeTime } from "@/lib/format";
+import { IconActivity } from "@/components/ui/icons";
 
 const ACTION_LABELS: Record<string, string> = {
-  detect: "Detected",
-  diagnose: "Diagnosed",
-  decide: "Decided",
+  detect: "Risk detected",
+  diagnose: "Diagnosis completed",
+  decide: "Recovery strategy selected",
   recover: "Recovery action",
   measure: "Measured",
-  guardrail_block: "Guardrail block",
+  guardrail_block: "Guardrail triggered",
   guardrail_warn: "Guardrail warning",
   webhook: "Razorpay webhook",
   error: "Error",
 };
 
-const ACTION_STYLES: Record<string, string> = {
-  detect: "bg-amber-500",
-  diagnose: "bg-blue-500",
+const DOT_COLORS: Record<string, string> = {
+  detect: "bg-warning",
+  diagnose: "bg-sky-500",
   decide: "bg-indigo-500",
-  recover: "bg-emerald-500",
-  measure: "bg-gray-400",
-  guardrail_block: "bg-red-500",
+  recover: "bg-brand",
+  measure: "bg-faint",
+  guardrail_block: "bg-danger",
   guardrail_warn: "bg-orange-400",
-  webhook: "bg-emerald-600",
+  webhook: "bg-brand-dark",
   error: "bg-red-600",
+};
+
+const ACTOR_LABELS: Record<string, string> = {
+  system: "System",
+  ai_agent: "AI agent",
+  razorpay_webhook: "Razorpay",
+  user: "Operator",
 };
 
 function describeActivity(row: ActivityRow): string {
@@ -50,46 +61,80 @@ function describeActivity(row: ActivityRow): string {
   }
 }
 
-export function RecentActivity({ rows }: { rows: ActivityRow[] }) {
+export function ActivityTimeline({
+  rows,
+  className = "",
+}: {
+  rows: ActivityRow[];
+  className?: string;
+}) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center">
-        <p className="text-sm text-gray-500">
-          No activity yet. Run the detection pipeline to get started.
-        </p>
-      </div>
+      <EmptyState
+        icon={<IconActivity className="h-5 w-5" />}
+        title="No recovery activity yet"
+        hint="Run a recovery scan to identify revenue at risk. Engine events will appear here."
+      />
     );
   }
 
   return (
-    <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white shadow-sm">
+    <ol className={`relative ${className}`}>
+      <span
+        aria-hidden="true"
+        className="absolute bottom-3 left-[7px] top-3 w-px bg-line"
+      />
       {rows.map((row) => (
-        <li key={row.id} className="flex items-start gap-3 px-4 py-3">
+        <li key={row.id} className="relative flex gap-4 py-3 pl-8 pr-1">
           <span
-            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-              ACTION_STYLES[row.action] ?? "bg-gray-400"
+            aria-hidden="true"
+            className={`absolute left-0 top-[17px] h-[15px] w-[15px] rounded-full border-[3px] border-surface ${
+              DOT_COLORS[row.action] ?? "bg-faint"
             }`}
           />
-          <div className="min-w-0">
-            <p className="text-sm text-gray-900">
-              <span className="font-medium">{ACTION_LABELS[row.action] ?? row.action}</span>
-              <span className="ml-2 text-xs text-gray-400">{row.actor}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <p className="text-[13px] font-semibold text-ink">
+                {ACTION_LABELS[row.action] ?? row.action}
+              </p>
+              <span className="rounded-full border border-line bg-canvas px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-faint">
+                {ACTOR_LABELS[row.actor] ?? row.actor}
+              </span>
               {row.status !== "success" && (
                 <span
-                  className={`ml-2 text-xs font-medium ${
-                    row.status === "warning" ? "text-amber-600" : "text-red-600"
+                  className={`text-[11px] font-medium ${
+                    row.status === "warning" ? "text-warning" : "text-danger"
                   }`}
                 >
                   {row.status}
                 </span>
               )}
-            </p>
+            </div>
             {describeActivity(row) && (
-              <p className="truncate text-xs text-gray-500">{describeActivity(row)}</p>
+              <p className="mt-0.5 truncate text-[13px] leading-5 text-muted">
+                {describeActivity(row)}
+              </p>
             )}
           </div>
+          <time className="shrink-0 pt-0.5 text-[11px] leading-5 text-faint">
+            {formatRelativeTime(row.createdAt)}
+          </time>
         </li>
       ))}
-    </ul>
+    </ol>
+  );
+}
+
+export function RecentActivityCard({ rows }: { rows: ActivityRow[] }) {
+  return (
+    <Card>
+      <CardHeader
+        title="Recent activity"
+        description="Engine events from the last runs, newest first."
+      />
+      <div className="px-5 py-2">
+        <ActivityTimeline rows={rows} />
+      </div>
+    </Card>
   );
 }
