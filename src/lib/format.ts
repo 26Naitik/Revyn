@@ -143,6 +143,8 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   recovered: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   pending: "bg-amber-50 text-amber-700 ring-amber-600/20",
   executing: "bg-blue-50 text-blue-700 ring-blue-600/20",
+  retry_scheduled: "bg-orange-50 text-orange-700 ring-orange-600/20",
+  escalated: "bg-violet-50 text-violet-700 ring-violet-600/20",
   succeeded: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   failed: "bg-red-50 text-red-700 ring-red-600/20",
   cancelled: "bg-gray-100 text-gray-600 ring-gray-500/20",

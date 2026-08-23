@@ -30,7 +30,6 @@ describe("isPaymentLinkEligible", () => {
     ["succeeded", "send_payment_link"],
     ["failed", "send_payment_link"],
     ["cancelled", "send_payment_link"],
-    ["pending", "retry_payment"],
     ["pending", "schedule_retry"],
     ["pending", "escalate_human"],
     ["pending", "no_action"],

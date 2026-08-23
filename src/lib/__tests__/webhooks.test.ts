@@ -59,6 +59,7 @@ const baseWorkflow = {
   status: "executing",
   amountRecovered: 0,
   razorpayActionId: null,
+  attemptCount: 1,
   revenueRisk: { amountAtRisk: 29900 },
 };
 
@@ -219,7 +220,7 @@ describe("handleRazorpayWebhook", () => {
     );
   });
 
-  it("is idempotent for duplicate deliveries", async () => {
+  it("is idempotent for duplicate deliveries and audits the suppression", async () => {
     mocks.wfFindFirst.mockResolvedValue({
       ...baseWorkflow,
       status: "succeeded",
@@ -234,7 +235,16 @@ describe("handleRazorpayWebhook", () => {
     expect(res.body).toMatchObject({ ok: true, handled: true, duplicate: true });
     expect(mocks.riskUpdate).not.toHaveBeenCalled();
     expect(mocks.auditCreateInTx).not.toHaveBeenCalled();
-    expect(mocks.auditCreateOuter).not.toHaveBeenCalled();
+    // Duplicate deliveries are absorbed AND recorded as suppressed events.
+    expect(mocks.auditCreateOuter).toHaveBeenCalledTimes(1);
+    expect(mocks.auditCreateOuter).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recoveryId: "wf1",
+        action: "recover",
+        status: "warning",
+        details: expect.stringContaining('"kind":"duplicate_suppressed"'),
+      }),
+    });
   });
 
   it("resolves workflows via reference_id when the link id is unknown", async () => {
@@ -299,5 +309,162 @@ describe("handleRazorpayWebhook", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe("webhook_processing_failed");
+  });
+});
+
+describe("payment_link.expired handling", () => {
+  const tx = {
+    recoveryWorkflow: {
+      findFirst: mocks.wfFindFirst,
+      findUnique: mocks.wfFindUnique,
+      updateMany: mocks.wfUpdateMany,
+    },
+    revenueAtRisk: { update: mocks.riskUpdate },
+    auditLog: { create: mocks.auditCreateInTx },
+  };
+
+  beforeEach(() => {
+    for (const fn of Object.values(mocks)) {
+      fn.mockReset();
+    }
+    process.env.RAZORPAY_WEBHOOK_SECRET = SECRET;
+    mocks.transaction.mockImplementation(
+      async (fn: (t: typeof tx) => unknown) => fn(tx)
+    );
+    mocks.wfFindFirst.mockResolvedValue(null);
+    mocks.wfFindUnique.mockResolvedValue(null);
+    mocks.wfUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.riskUpdate.mockResolvedValue({});
+    mocks.auditCreateInTx.mockResolvedValue({});
+    mocks.auditCreateOuter.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    delete process.env.RAZORPAY_WEBHOOK_SECRET;
+  });
+
+  function buildExpiredEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      event: "payment_link.expired",
+      created_at: 1756000000,
+      payload: {
+        payment_link: {
+          entity: {
+            id: "plink_abc123",
+            reference_id: "revyn_wf1",
+            status: "expired",
+            ...overrides,
+          },
+        },
+      },
+    };
+  }
+
+  it("schedules a retry when attempts remain", async () => {
+    mocks.wfFindFirst.mockResolvedValue({ ...baseWorkflow, attemptCount: 1 });
+    mocks.wfUpdateMany.mockResolvedValue({ count: 1 });
+
+    const rawBody = JSON.stringify(buildExpiredEvent());
+    const res = await handleRazorpayWebhook(rawBody, sign(rawBody));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      handled: true,
+      retryScheduled: true,
+      recoveryId: "wf1",
+    });
+    expect(mocks.wfUpdateMany).toHaveBeenCalledWith({
+      where: { id: "wf1", status: { in: ["pending", "executing", "retry_scheduled"] } },
+      data: expect.objectContaining({
+        status: "retry_scheduled",
+        lastFailureReason: "payment_link_expired",
+        lastFailureCategory: "temporary",
+        nextRetryAt: expect.any(Date),
+      }),
+    });
+    expect(mocks.auditCreateInTx).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "webhook",
+        status: "warning",
+        details: expect.stringContaining('"to":"retry_scheduled"'),
+      }),
+    });
+  });
+
+  it("moves to terminal failure once the retry limit is exhausted", async () => {
+    mocks.wfFindFirst.mockResolvedValue({ ...baseWorkflow, attemptCount: 3 });
+    mocks.wfUpdateMany.mockResolvedValue({ count: 1 });
+
+    const rawBody = JSON.stringify(buildExpiredEvent());
+    const res = await handleRazorpayWebhook(rawBody, sign(rawBody));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      handled: true,
+      retryScheduled: false,
+    });
+    expect(mocks.wfUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+          nextRetryAt: null,
+          completedAt: expect.any(Date),
+        }),
+      })
+    );
+    expect(mocks.auditCreateInTx).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: "failure" }),
+    });
+  });
+
+  it("treats an expired event for an already-succeeded workflow as duplicate", async () => {
+    mocks.wfFindFirst.mockResolvedValue({
+      ...baseWorkflow,
+      status: "succeeded",
+    });
+
+    const rawBody = JSON.stringify(buildExpiredEvent());
+    const res = await handleRazorpayWebhook(rawBody, sign(rawBody));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, handled: true, duplicate: true });
+    expect(mocks.wfUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores expiry events for terminal workflows without touching state", async () => {
+    mocks.wfFindFirst.mockResolvedValue({ ...baseWorkflow, status: "cancelled" });
+
+    const rawBody = JSON.stringify(buildExpiredEvent());
+    const res = await handleRazorpayWebhook(rawBody, sign(rawBody));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, handled: true, ignored: true });
+    expect(mocks.wfUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.auditCreateInTx).not.toHaveBeenCalled();
+  });
+
+  it("audits and skips expiry events with unknown references", async () => {
+    const rawBody = JSON.stringify(
+      buildExpiredEvent({ reference_id: "revyn_missing_wf" })
+    );
+    const res = await handleRazorpayWebhook(rawBody, sign(rawBody));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      handled: false,
+      reason: "unknown_reference",
+    });
+    expect(mocks.wfUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.auditCreateOuter).toHaveBeenCalledTimes(1);
+    expect(mocks.auditCreateOuter).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "webhook",
+        actor: "razorpay_webhook",
+        status: "warning",
+      }),
+    });
   });
 });

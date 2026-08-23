@@ -1,6 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  RETRY_POLICY,
+  nextRetryDate,
+  hasAttemptsLeft,
+} from "@/lib/recovery/retry-policy";
+import { FAILURE_REASONS } from "@/lib/recovery/failure-classification";
+import { recordDuplicateSuppressed } from "@/lib/recovery/audit";
 
 export const RAZORPAY_SIGNATURE_HEADER = "x-razorpay-signature";
 
@@ -53,6 +60,7 @@ interface ResolvedWorkflow {
   status: string;
   amountRecovered: number;
   razorpayActionId: string | null;
+  attemptCount: number;
   revenueRisk: {
     amountAtRisk: number;
   };
@@ -162,6 +170,8 @@ export async function processPaymentLinkPaidEvent(
     const amountRecorded =
       cap > 0 ? Math.min(amountPaid, cap) : amountPaid;
 
+    const previousStatus = workflow.status;
+
     const claimed = await tx.recoveryWorkflow.updateMany({
       where: { id: workflow.id, status: { not: "succeeded" } },
       data: {
@@ -190,7 +200,10 @@ export async function processPaymentLinkPaidEvent(
         action: "webhook",
         actor: "razorpay_webhook",
         details: JSON.stringify({
-          event: "payment_link.paid",
+          kind: "lifecycle",
+          event: "payment_link_paid",
+          from: previousStatus,
+          to: "succeeded",
           paymentLinkId,
           referenceId,
           razorpayPaymentId,
@@ -225,6 +238,183 @@ export async function processPaymentLinkPaidEvent(
         status: "warning",
       },
     });
+  }
+
+  if (result.outcome === "duplicate") {
+    await recordDuplicateSuppressed(prisma, {
+      recoveryId: result.workflowId,
+      event: "payment_link.paid",
+      actor: "razorpay_webhook",
+      reason: "workflow_already_succeeded",
+      metadata: { paymentLinkId },
+    }).catch(() => undefined);
+  }
+
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/*  payment_link.expired                                              */
+/* ------------------------------------------------------------------ */
+
+export interface ExpiredProcessedOutcome {
+  outcome: "processed";
+  workflowId: string;
+  riskId: string;
+  result: "retry_scheduled" | "failed";
+  nextRetryAt: string | null;
+}
+
+interface ExpiredTerminalOutcome {
+  outcome: "terminal";
+  workflowId: string;
+}
+
+type PaymentLinkExpiredResult =
+  | ExpiredProcessedOutcome
+  | DuplicateOutcome
+  | UnknownOutcome
+  | ExpiredTerminalOutcome;
+
+/**
+ * Handles `payment_link.expired`: the customer did not pay before the link
+ * lapsed. Classified as a TEMPORARY failure - the customer may still pay via
+ * a fresh link - so the workflow either gets a scheduled retry (within the
+ * retry policy) or moves to terminal failure once attempts are exhausted.
+ */
+export async function processPaymentLinkExpiredEvent(
+  event: unknown
+): Promise<PaymentLinkExpiredResult> {
+  if (!isRecord(event) || event.event !== "payment_link.expired") {
+    throw new Error("processPaymentLinkExpiredEvent expects a payment_link.expired event");
+  }
+
+  const payload = isRecord(event.payload) ? event.payload : null;
+  const plinkPayload =
+    payload && isRecord(payload.payment_link) ? payload.payment_link : null;
+  const entity =
+    plinkPayload && isRecord(plinkPayload.entity) ? plinkPayload.entity : null;
+
+  if (!entity) {
+    throw new Error("payment_link.expired event has no payment_link entity");
+  }
+
+  const paymentLinkId = asString(entity.id);
+  const referenceId = asString(entity.reference_id);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const workflow = await findWorkflowForPaymentLink(tx, entity);
+
+    if (!workflow) {
+      return { outcome: "unknown_reference" } satisfies UnknownOutcome;
+    }
+
+    if (
+      workflow.status === "succeeded" ||
+      workflow.status === "failed" ||
+      workflow.status === "cancelled" ||
+      workflow.status === "escalated"
+    ) {
+      if (workflow.status === "succeeded") {
+        return {
+          outcome: "duplicate",
+          workflowId: workflow.id,
+        } satisfies DuplicateOutcome;
+      }
+      return {
+        outcome: "terminal",
+        workflowId: workflow.id,
+      } satisfies ExpiredTerminalOutcome;
+    }
+
+    // Expiry is temporary; retry while the policy allows attempts.
+    const willRetry = hasAttemptsLeft(workflow.attemptCount);
+    const nextRetryAt = nextRetryDate(
+      Math.max(1, workflow.attemptCount),
+      null
+    );
+
+    const updated = await tx.recoveryWorkflow.updateMany({
+      where: { id: workflow.id, status: { in: ["pending", "executing", "retry_scheduled"] } },
+      data: willRetry
+        ? {
+            status: "retry_scheduled",
+            startedAt: null,
+            nextRetryAt,
+            lastFailureReason: FAILURE_REASONS.paymentLinkExpired,
+            lastFailureCategory: "temporary",
+          }
+        : {
+            status: "failed",
+            startedAt: null,
+            nextRetryAt: null,
+            completedAt: new Date(),
+            lastFailureReason: FAILURE_REASONS.paymentLinkExpired,
+            lastFailureCategory: "temporary",
+          },
+    });
+
+    if (updated.count === 0) {
+      return {
+        outcome: "duplicate",
+        workflowId: workflow.id,
+      } satisfies DuplicateOutcome;
+    }
+
+    const finalStatus = willRetry ? "retry_scheduled" : "failed";
+
+    await tx.auditLog.create({
+      data: {
+        revenueRiskId: workflow.revenueRiskId,
+        recoveryId: workflow.id,
+        action: "webhook",
+        actor: "razorpay_webhook",
+        details: JSON.stringify({
+          kind: "lifecycle",
+          event: "payment_link_expired",
+          from: workflow.status,
+          to: finalStatus,
+          reason:
+            "Retry scheduled because the payment link expired without payment." +
+            (willRetry ? "" : " Retry limit reached."),
+          paymentLinkId,
+          referenceId,
+          category: "temporary",
+          attemptCount: workflow.attemptCount,
+          maxAttempts: RETRY_POLICY.maxAttempts,
+          ...(willRetry ? { nextRetryAt: nextRetryAt.toISOString() } : {}),
+        }),
+        status: willRetry ? "warning" : "failure",
+      },
+    });
+
+    return {
+      outcome: "processed",
+      workflowId: workflow.id,
+      riskId: workflow.revenueRiskId,
+      result: finalStatus,
+      nextRetryAt: willRetry ? nextRetryAt.toISOString() : null,
+    } satisfies ExpiredProcessedOutcome;
+  });
+
+  if (result.outcome === "unknown_reference") {
+    await prisma.auditLog
+      .create({
+        data: {
+          revenueRiskId: null,
+          recoveryId: null,
+          action: "webhook",
+          actor: "razorpay_webhook",
+          details: JSON.stringify({
+            event: "payment_link.expired",
+            paymentLinkId,
+            referenceId,
+            reason: "no_matching_recovery_workflow",
+          }),
+          status: "warning",
+        },
+      })
+      .catch(() => undefined);
   }
 
   return result;
@@ -263,7 +453,14 @@ export async function handleRazorpayWebhook(
 
   const eventName = isRecord(event) ? event.event : undefined;
 
-  if (eventName !== "payment_link.paid") {
+  const supportedEvent =
+    eventName === "payment_link.paid"
+      ? "paid"
+      : eventName === "payment_link.expired"
+        ? "expired"
+        : null;
+
+  if (!supportedEvent) {
     return {
       status: 200,
       body: { ok: true, handled: false, event: eventName ?? null },
@@ -271,6 +468,42 @@ export async function handleRazorpayWebhook(
   }
 
   try {
+    if (supportedEvent === "expired") {
+      const result = await processPaymentLinkExpiredEvent(event);
+
+      switch (result.outcome) {
+        case "processed":
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              handled: true,
+              duplicate: false,
+              recoveryId: result.workflowId,
+              retryScheduled: result.result === "retry_scheduled",
+              nextRetryAt: result.nextRetryAt,
+            },
+          };
+        case "duplicate":
+        case "terminal":
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              handled: true,
+              duplicate: result.outcome === "duplicate",
+              ignored: result.outcome === "terminal",
+              recoveryId: result.workflowId,
+            },
+          };
+        case "unknown_reference":
+          return {
+            status: 200,
+            body: { ok: true, handled: false, reason: "unknown_reference" },
+          };
+      }
+    }
+
     const result = await processPaymentLinkPaidEvent(event);
 
     switch (result.outcome) {

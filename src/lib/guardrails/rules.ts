@@ -16,16 +16,23 @@ export async function checkMaxAttemptsPerRisk(
   const max = overrides?.maxAttemptsPerRisk ?? limits.maxAttemptsPerRisk;
   const risk = await prisma.revenueAtRisk.findUnique({
     where: { id: riskId },
-    include: { auditLogs: true },
+    include: {
+      recovery: { select: { attemptCount: true } },
+      auditLogs: true,
+    },
   });
 
   if (!risk) {
     return { allowed: false, rule: "risk_not_found", reason: "Risk record not found" };
   }
 
-  const attemptCount = risk.auditLogs.filter(
-    (log) => log.action === "recover" || log.action === "decide"
-  ).length;
+  // Prefer the authoritative attempt counter persisted on the workflow;
+  // fall back to audit-log counting for legacy risks without a workflow.
+  const attemptCount =
+    risk.recovery?.attemptCount ??
+    risk.auditLogs.filter(
+      (log) => log.action === "recover" || log.action === "decide"
+    ).length;
 
   if (attemptCount >= max) {
     return {

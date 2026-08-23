@@ -1,6 +1,7 @@
 export const PAYMENT_LINK_ELIGIBLE_STRATEGIES: ReadonlySet<string> = new Set([
   "send_payment_link",
   "offer_discount",
+  "retry_payment",
 ]);
 
 export function isPaymentLinkEligible(row: {

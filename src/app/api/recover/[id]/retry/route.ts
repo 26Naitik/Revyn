@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import {
   RecoveryExecutionError,
   executeRecoveryPaymentLink,
 } from "@/lib/recovery/execute";
-
-const requestSchema = z.object({
-  recoveryId: z.string().min(1).max(64),
-});
 
 const ERROR_STATUS_BY_CODE: Record<string, number> = {
   recovery_not_found: 404,
@@ -22,6 +17,7 @@ const ERROR_STATUS_BY_CODE: Record<string, number> = {
   guardrail_blocked: 409,
   duplicate_claim: 409,
   payment_link_creation_failed: 502,
+  recovery_execution_failed: 500,
 };
 
 function errorResponse(status: number, error: string, details?: unknown) {
@@ -31,31 +27,30 @@ function errorResponse(status: number, error: string, details?: unknown) {
   );
 }
 
-export async function POST(request: Request) {
-  let rawBody: unknown;
+/**
+ * Manual retry of a recovery workflow. Operators may re-execute failed
+ * workflows immediately (guardrails still apply); the retry policy caps
+ * total attempts either way.
+ */
+export async function POST(
+  _request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  const { id } = await context.params;
 
-  try {
-    rawBody = await request.json();
-  } catch {
-    return errorResponse(400, "invalid_json");
+  if (!id || id.length > 64) {
+    return errorResponse(400, "invalid_request");
   }
 
-  const parsed = requestSchema.safeParse(rawBody);
-
-  if (!parsed.success) {
-    return errorResponse(400, "invalid_request", parsed.error.issues);
-  }
-
   try {
-    const result = await executeRecoveryPaymentLink(parsed.data.recoveryId);
+    const result = await executeRecoveryPaymentLink(id, { manual: true });
 
     return NextResponse.json({
-      linkId: result.paymentLink.linkId,
-      shortUrl: result.paymentLink.shortUrl,
-      amount: result.paymentLink.amount,
-      referenceId: result.paymentLink.referenceId,
-      attemptCount: result.attemptCount,
+      ok: true,
+      recoveryId: result.recoveryId,
       status: result.status,
+      attemptCount: result.attemptCount,
+      paymentLink: result.paymentLink,
     });
   } catch (err) {
     if (err instanceof RecoveryExecutionError) {
@@ -64,7 +59,7 @@ export async function POST(request: Request) {
     }
 
     console.error(
-      "Unexpected recovery execution failure:",
+      "Unexpected manual retry failure:",
       err instanceof Error ? err.message : err
     );
     return errorResponse(500, "recovery_execution_failed");

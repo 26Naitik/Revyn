@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CreatePaymentLinkButton } from "@/components/dashboard/CreatePaymentLinkButton";
+import { RetryButton } from "@/components/dashboard/RetryButton";
 import { Badge } from "@/components/ui/Badge";
 import {
   TableShell,
@@ -25,14 +26,25 @@ export interface RecoveryViewRow {
   createdFull: string;
   customerName: string | null;
   customerEmail: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  lastAttemptLabel: string | null;
+  lastAttemptFull: string | null;
+  nextRetryLabel: string | null;
+  nextRetryFull: string | null;
+  failureReason: string | null;
+  failureCategoryLabel: string | null;
+  retryable: boolean;
 }
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
   { key: "pending", label: "Pending" },
   { key: "executing", label: "Executing" },
+  { key: "retry_scheduled", label: "Retry scheduled" },
   { key: "succeeded", label: "Succeeded" },
   { key: "failed", label: "Failed" },
+  { key: "escalated", label: "Escalated" },
   { key: "cancelled", label: "Cancelled" },
 ] as const;
 
@@ -191,7 +203,32 @@ export function RecoveriesExplorer({
                   ) : null}
                 </Td>
                 <Td>
-                  <Badge status={row.status} />
+                  <div className="space-y-1">
+                    <Badge status={row.status} />
+                    <p className="text-[11px] leading-4 text-faint tabular-nums">
+                      {row.attemptCount}/{row.maxAttempts} attempts
+                      {row.lastAttemptLabel ? ` · last ${row.lastAttemptLabel}` : ""}
+                    </p>
+                    {row.status === "retry_scheduled" && row.nextRetryLabel && (
+                      <p
+                        className="text-[11px] leading-4 text-warning"
+                        title={row.nextRetryFull ?? undefined}
+                      >
+                        Next retry {row.nextRetryLabel}
+                      </p>
+                    )}
+                    {row.failureReason && (
+                      <p
+                        className="max-w-[240px] truncate text-[11px] leading-4 text-danger"
+                        title={row.failureReason}
+                      >
+                        {row.failureCategoryLabel
+                          ? `${row.failureCategoryLabel}: `
+                          : ""}
+                        {row.failureReason}
+                      </p>
+                    )}
+                  </div>
                 </Td>
                 <Td
                   className="whitespace-nowrap text-[13px] text-muted"
@@ -200,7 +237,9 @@ export function RecoveriesExplorer({
                   {row.createdLabel}
                 </Td>
                 <Td align="right">
-                  {isPaymentLinkEligible(row) ? (
+                  {row.retryable ? (
+                    <RetryButton recoveryId={row.recoveryId} />
+                  ) : isPaymentLinkEligible(row) ? (
                     <CreatePaymentLinkButton recoveryId={row.recoveryId} />
                   ) : row.status === "executing" ? (
                     <span className="text-xs text-faint">Awaiting payment…</span>
@@ -208,6 +247,8 @@ export function RecoveriesExplorer({
                     <span className="text-xs font-medium text-brand-dark">
                       Completed
                     </span>
+                  ) : row.status === "escalated" ? (
+                    <span className="text-xs text-faint">With operator</span>
                   ) : (
                     <span className="text-xs text-faint">—</span>
                   )}

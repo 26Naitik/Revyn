@@ -7,6 +7,10 @@ export interface MeasurementResult extends DashboardStats {
   escalatedCount: number;
   totalRiskItems: number;
   totalRecoveryWorkflows: number;
+  retryScheduledCount: number;
+  failedRecoveryCount: number;
+  executionsInProgressCount: number;
+  duplicateEventsSuppressedCount: number;
 }
 
 export async function measureStats(): Promise<MeasurementResult> {
@@ -18,8 +22,12 @@ export async function measureStats(): Promise<MeasurementResult> {
     pendingSum,
     failedSum,
     activeRecoveries,
-    escalatedCount,
+    escalationsByStatus,
     totalRecoveryWorkflows,
+    retryScheduledCount,
+    failedRecoveryCount,
+    executingCount,
+    duplicatesSuppressed,
   ] = await Promise.all([
     prisma.revenueAtRisk.findMany({
       select: { id: true, type: true, status: true, amountAtRisk: true },
@@ -37,7 +45,7 @@ export async function measureStats(): Promise<MeasurementResult> {
       _sum: { amountRecovered: true },
     }),
     prisma.recoveryWorkflow.aggregate({
-      where: { status: "pending" },
+      where: { status: { in: ["pending", "retry_scheduled"] } },
       _sum: { amountRecovered: true },
     }),
     prisma.recoveryWorkflow.aggregate({
@@ -45,12 +53,29 @@ export async function measureStats(): Promise<MeasurementResult> {
       _sum: { amountRecovered: true },
     }),
     prisma.recoveryWorkflow.count({
-      where: { status: { in: ["pending", "executing"] } },
+      where: { status: { in: ["pending", "executing", "retry_scheduled"] } },
     }),
     prisma.recoveryWorkflow.count({
-      where: { strategy: "escalate_human" },
+      where: {
+        OR: [{ status: "escalated" }, { strategy: "escalate_human" }],
+      },
     }),
     prisma.recoveryWorkflow.count(),
+    prisma.recoveryWorkflow.count({
+      where: { status: "retry_scheduled" },
+    }),
+    prisma.recoveryWorkflow.count({
+      where: { status: "failed" },
+    }),
+    prisma.recoveryWorkflow.count({
+      where: { status: "executing" },
+    }),
+    prisma.auditLog.count({
+      where: {
+        action: "recover",
+        details: { contains: '"kind":"duplicate_suppressed"' },
+      },
+    }),
   ]);
 
   const totalAtRisk = allRisks.reduce((sum, r) => sum + r.amountAtRisk, 0);
@@ -94,8 +119,12 @@ export async function measureStats(): Promise<MeasurementResult> {
     byStatus,
     pendingRecoveryAmount: pendingSum._sum.amountRecovered ?? 0,
     failedRecoveryAmount: failedSum._sum.amountRecovered ?? 0,
-    escalatedCount,
+    escalatedCount: escalationsByStatus,
     totalRiskItems: allRisks.length,
     totalRecoveryWorkflows,
+    retryScheduledCount,
+    failedRecoveryCount,
+    executionsInProgressCount: executingCount,
+    duplicateEventsSuppressedCount: duplicatesSuppressed,
   };
 }

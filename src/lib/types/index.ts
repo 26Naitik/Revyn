@@ -25,9 +25,13 @@ export type RecoveryStrategy =
 export type RecoveryStatus =
   | "pending"
   | "executing"
+  | "retry_scheduled"
   | "succeeded"
   | "failed"
+  | "escalated"
   | "cancelled";
+
+export type FailureCategory = "temporary" | "permanent";
 
 export type DecisionPriority = "low" | "medium" | "high" | "critical";
 

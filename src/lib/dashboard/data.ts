@@ -18,6 +18,11 @@ export interface RecoveryRow {
   rootCause: string | null;
   razorpayActionId: string | null;
   amountRecovered: number;
+  attemptCount: number;
+  lastAttemptAt: Date | null;
+  nextRetryAt: Date | null;
+  lastFailureReason: string | null;
+  lastFailureCategory: string | null;
   createdAt: Date;
   customerName: string | null;
   customerEmail: string | null;
@@ -134,6 +139,11 @@ export async function listRecentRecoveries(
       rootCause: wf.revenueRisk.rootCause,
       razorpayActionId: wf.razorpayActionId,
       amountRecovered: wf.amountRecovered,
+      attemptCount: wf.attemptCount,
+      lastAttemptAt: wf.lastAttemptAt,
+      nextRetryAt: wf.nextRetryAt,
+      lastFailureReason: wf.lastFailureReason,
+      lastFailureCategory: wf.lastFailureCategory,
       createdAt: wf.createdAt,
       customerName: customer?.name ?? null,
       customerEmail: customer?.email ?? null,

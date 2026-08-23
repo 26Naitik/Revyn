@@ -7,10 +7,10 @@ datasource db {
 }
 
 model Merchant {
-  id            String         @id @default(cuid())
+  id            String          @id @default(cuid())
   name          String
   razorpayMerId String?
-  createdAt     DateTime       @default(now())
+  createdAt     DateTime        @default(now())
   customers     Customer[]
   orders        Order[]
   payments      Payment[]
@@ -33,16 +33,16 @@ model Customer {
 }
 
 model Order {
-  id              String         @id @default(cuid())
+  id              String          @id @default(cuid())
   merchantId      String
-  merchant        Merchant       @relation(fields: [merchantId], references: [id])
+  merchant        Merchant        @relation(fields: [merchantId], references: [id])
   customerId      String
-  customer        Customer       @relation(fields: [customerId], references: [id])
+  customer        Customer        @relation(fields: [customerId], references: [id])
   razorpayOrderId String
   amount          Int
-  currency        String         @default("INR")
-  status          String         @default("created")
-  createdAt       DateTime       @default(now())
+  currency        String          @default("INR")
+  status          String          @default("created")
+  createdAt       DateTime        @default(now())
   payments        Payment[]
   risks           RevenueAtRisk[]
 }
@@ -60,37 +60,37 @@ model Plan {
 }
 
 model Subscription {
-  id              String         @id @default(cuid())
-  merchantId      String
-  merchant        Merchant       @relation(fields: [merchantId], references: [id])
-  customerId      String
-  customer        Customer       @relation(fields: [customerId], references: [id])
-  planId          String
-  plan            Plan           @relation(fields: [planId], references: [id])
-  razorpaySubId   String
-  status          String         @default("created")
-  currentStart    DateTime?
-  currentEnd      DateTime?
-  paidCount       Int            @default(0)
-  remainingCount  Int            @default(0)
-  createdAt       DateTime       @default(now())
-  payments        Payment[]
-  risks           RevenueAtRisk[]
+  id             String          @id @default(cuid())
+  merchantId     String
+  merchant       Merchant        @relation(fields: [merchantId], references: [id])
+  customerId     String
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  planId         String
+  plan           Plan            @relation(fields: [planId], references: [id])
+  razorpaySubId  String
+  status         String          @default("created")
+  currentStart   DateTime?
+  currentEnd     DateTime?
+  paidCount      Int             @default(0)
+  remainingCount Int             @default(0)
+  createdAt      DateTime        @default(now())
+  payments       Payment[]
+  risks          RevenueAtRisk[]
 }
 
 model Payment {
-  id                String         @id @default(cuid())
+  id                String          @id @default(cuid())
   merchantId        String
-  merchant          Merchant       @relation(fields: [merchantId], references: [id])
+  merchant          Merchant        @relation(fields: [merchantId], references: [id])
   customerId        String
-  customer          Customer       @relation(fields: [customerId], references: [id])
+  customer          Customer        @relation(fields: [customerId], references: [id])
   orderId           String?
-  order             Order?         @relation(fields: [orderId], references: [id])
+  order             Order?          @relation(fields: [orderId], references: [id])
   subscriptionId    String?
-  subscription      Subscription?  @relation(fields: [subscriptionId], references: [id])
+  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id])
   razorpayPaymentId String
   amount            Int
-  currency          String         @default("INR")
+  currency          String          @default("INR")
   method            String?
   status            String
   errorCode         String?
@@ -98,64 +98,69 @@ model Payment {
   errorSource       String?
   errorStep         String?
   errorReason       String?
-  captured          Boolean        @default(false)
-  amountRefunded    Int            @default(0)
-  createdAt         DateTime       @default(now())
+  captured          Boolean         @default(false)
+  amountRefunded    Int             @default(0)
+  createdAt         DateTime        @default(now())
   risks             RevenueAtRisk[]
 }
 
 model RevenueAtRisk {
-  id              String           @id @default(cuid())
+  id              String            @id @default(cuid())
   merchantId      String
-  merchant        Merchant         @relation(fields: [merchantId], references: [id])
+  merchant        Merchant          @relation(fields: [merchantId], references: [id])
   paymentId       String?
-  payment         Payment?         @relation(fields: [paymentId], references: [id])
+  payment         Payment?          @relation(fields: [paymentId], references: [id])
   subscriptionId  String?
-  subscription    Subscription?    @relation(fields: [subscriptionId], references: [id])
+  subscription    Subscription?     @relation(fields: [subscriptionId], references: [id])
   orderId         String?
-  order           Order?           @relation(fields: [orderId], references: [id])
+  order           Order?            @relation(fields: [orderId], references: [id])
   type            String
   amountAtRisk    Int
-  currency        String           @default("INR")
-  status          String           @default("detected")
+  currency        String            @default("INR")
+  status          String            @default("detected")
   rootCause       String?
-  confidenceScore Float            @default(0)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  confidenceScore Float             @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
   recovery        RecoveryWorkflow?
   auditLogs       AuditLog[]
 }
 
 model RecoveryWorkflow {
-  id                String         @id @default(cuid())
-  revenueRiskId     String         @unique
-  revenueRisk       RevenueAtRisk  @relation(fields: [revenueRiskId], references: [id])
-  strategy          String
-  aiDecisionReason  String
-  status            String         @default("pending")
-  razorpayActionId  String?
-  amountRecovered   Int            @default(0)
-  recoveryScore     Float          @default(0)
-  confidence        Float          @default(0)
-  priority          String         @default("medium")
-  discountPercent   Float          @default(0)
-  retryDelay        String?
-  nextStep          String?
-  factors           Json?
-  decisionSource    String         @default("rules")
-  startedAt         DateTime?
-  completedAt       DateTime?
-  createdAt         DateTime       @default(now())
+  id                  String        @id @default(cuid())
+  revenueRiskId       String        @unique
+  revenueRisk         RevenueAtRisk @relation(fields: [revenueRiskId], references: [id])
+  strategy            String
+  aiDecisionReason    String
+  status              String        @default("pending")
+  razorpayActionId    String?
+  amountRecovered     Int           @default(0)
+  recoveryScore       Float         @default(0)
+  confidence          Float         @default(0)
+  priority            String        @default("medium")
+  discountPercent     Float         @default(0)
+  retryDelay          String?
+  nextStep            String?
+  factors             Json?
+  decisionSource      String        @default("rules")
+  attemptCount        Int           @default(0)
+  lastAttemptAt       DateTime?
+  nextRetryAt         DateTime?
+  lastFailureReason   String?
+  lastFailureCategory String?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime      @default(now())
 }
 
 model AuditLog {
-  id              String        @id @default(cuid())
-  revenueRiskId   String?
-  revenueRisk     RevenueAtRisk? @relation(fields: [revenueRiskId], references: [id])
-  recoveryId      String?
-  action          String
-  actor           String
-  details         String
-  status          String
-  createdAt       DateTime      @default(now())
+  id            String         @id @default(cuid())
+  revenueRiskId String?
+  revenueRisk   RevenueAtRisk? @relation(fields: [revenueRiskId], references: [id])
+  recoveryId    String?
+  action        String
+  actor         String
+  details       String
+  status        String
+  createdAt     DateTime       @default(now())
 }

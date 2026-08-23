@@ -17,6 +17,7 @@ const prisma = new PrismaClient({ adapter });
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+const hoursFromNow = (n: number) => new Date(Date.now() + n * 3_600_000);
 
 /* ---------- fixed primary-key IDs --------------------------------- */
 
@@ -312,8 +313,7 @@ async function main() {
     },
   });
 
-  const recoveredRisk = await prisma.revenueAtRisk.upsert({
-    where: { id: RISK_RECOVERED },
+  const recoveredRisk = await prisma.revenueAtRisk.upsert({    where: { id: RISK_RECOVERED },
     create: {
       id: RISK_RECOVERED,
       merchantId: MERCHANT_ID,
@@ -345,6 +345,8 @@ async function main() {
       status: "succeeded",
       razorpayActionId: "plink_demo_recovered_001",
       amountRecovered: AMT_2499,
+      attemptCount: 2,
+      lastAttemptAt: daysAgo(20),
       startedAt: daysAgo(20),
       completedAt: daysAgo(19),
       createdAt: daysAgo(20),
@@ -355,6 +357,8 @@ async function main() {
     },
     update: {
       status: "succeeded",
+      attemptCount: 2,
+      lastAttemptAt: daysAgo(20),
       createdAt: daysAgo(20),
     },
   });
@@ -416,6 +420,110 @@ async function main() {
       update: {
         createdAt: failure.at,
       },
+    });
+  }
+
+  /* 10. Recovery lifecycle scenarios ---------------------------------- */
+  /* a) retryable failure: link expired once, retry is scheduled */
+  const kabirRetryRisk = await prisma.revenueAtRisk.findFirst({
+    where: { paymentId: KABIR_FAIL_2 },
+  });
+
+  if (kabirRetryRisk) {
+    const nextRetryAt = hoursFromNow(12);
+    await prisma.recoveryWorkflow.upsert({
+      where: { revenueRiskId: kabirRetryRisk.id },
+      create: {
+        revenueRiskId: kabirRetryRisk.id,
+        strategy: "send_payment_link",
+        aiDecisionReason:
+          "Card declined twice; a payment link lets the customer use another method.",
+        status: "retry_scheduled",
+        attemptCount: 1,
+        lastAttemptAt: daysAgo(1),
+        nextRetryAt,
+        lastFailureReason: "payment_link_expired",
+        lastFailureCategory: "temporary",
+        startedAt: null,
+        createdAt: daysAgo(2),
+        recoveryScore: 52,
+        confidence: 0.7,
+        priority: "high",
+        decisionSource: "rules",
+      },
+      update: {
+        status: "retry_scheduled",
+        attemptCount: 1,
+        lastAttemptAt: daysAgo(1),
+        nextRetryAt,
+        lastFailureReason: "payment_link_expired",
+        lastFailureCategory: "temporary",
+        startedAt: null,
+        amountRecovered: 0,
+      },
+    });
+    await prisma.revenueAtRisk.update({
+      where: { id: kabirRetryRisk.id },
+      data: { status: "decided" },
+    });
+    await prisma.auditLog.create({
+      data: {
+        revenueRiskId: kabirRetryRisk.id,
+        action: "webhook",
+        actor: "razorpay_webhook",
+        details: JSON.stringify({
+          kind: "lifecycle",
+          event: "payment_link_expired",
+          from: "executing",
+          to: "retry_scheduled",
+          reason:
+            "Retry scheduled because the payment link expired without payment.",
+          category: "temporary",
+        }),
+        status: "warning",
+      },
+    });
+  }
+
+  /* b) escalated recovery: repeated permanent failures handed to an operator */
+  const priyaEscalatedRisk = await prisma.revenueAtRisk.findFirst({
+    where: { orderId: ORDER_OVERDUE },
+  });
+
+  if (priyaEscalatedRisk) {
+    await prisma.recoveryWorkflow.upsert({
+      where: { revenueRiskId: priyaEscalatedRisk.id },
+      create: {
+        revenueRiskId: priyaEscalatedRisk.id,
+        strategy: "send_payment_link",
+        aiDecisionReason:
+          "Overdue invoice; automated attempts exhausted, requires account manager follow-up.",
+        status: "escalated",
+        attemptCount: 3,
+        lastAttemptAt: daysAgo(1),
+        nextRetryAt: null,
+        lastFailureReason: "invalid_customer_state",
+        lastFailureCategory: "permanent",
+        startedAt: null,
+        createdAt: daysAgo(4),
+        recoveryScore: 44,
+        confidence: 0.55,
+        priority: "critical",
+        decisionSource: "ai",
+      },
+      update: {
+        status: "escalated",
+        attemptCount: 3,
+        lastAttemptAt: daysAgo(1),
+        nextRetryAt: null,
+        lastFailureReason: "invalid_customer_state",
+        lastFailureCategory: "permanent",
+        amountRecovered: 0,
+      },
+    });
+    await prisma.revenueAtRisk.update({
+      where: { id: priyaEscalatedRisk.id },
+      data: { status: "decided" },
     });
   }
 
@@ -483,6 +591,8 @@ async function main() {
   console.log("  d) overdue receivable ₹18,500 (2 days old)");
   console.log("  e) repeat-failure customer Kabir (3 recent failures, ₹8,999 fresh)");
   console.log("  f) previously-recovered customer Aarav (history for scoring)");
+  console.log("  g) retry_scheduled workflow (link expired, next retry in ~12h)");
+  console.log("  h) escalated workflow (3 failed attempts, permanent failure)");
   console.log("");
   console.log("Run `npm run db:seed && npm run dev` then:");
   console.log("  POST /api/pipeline — detect → diagnose → decide");
