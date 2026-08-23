@@ -29,6 +29,10 @@ export type RecoveryStatus =
   | "failed"
   | "cancelled";
 
+export type DecisionPriority = "low" | "medium" | "high" | "critical";
+
+export type DecisionSource = "rules" | "ai";
+
 export type AuditAction =
   | "detect"
   | "diagnose"
@@ -81,4 +85,30 @@ export interface RecoveryDecision {
   discountPercent: number;
   retryDelay: string | null;
   escalationReason: string | null;
+}
+
+export interface RecoveryFactor {
+  key: string;
+  label: string;
+  value: number;
+  weight: number;
+  contribution: number;
+  detail: string;
+}
+
+export type RecoveryScoreBand = "low" | "medium" | "high";
+
+export interface RecoveryScoreResult {
+  score: number;
+  band: RecoveryScoreBand;
+  factors: RecoveryFactor[];
+}
+
+export interface RecoveryDecisionResult extends RecoveryDecision {
+  recoveryScore: number;
+  scoreBand: RecoveryScoreBand;
+  priority: DecisionPriority;
+  nextStep: string | null;
+  factors: RecoveryFactor[];
+  source: DecisionSource;
 }

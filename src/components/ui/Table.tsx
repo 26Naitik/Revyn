@@ -68,9 +68,20 @@ export function Td({
   );
 }
 
-export function Tr({ children }: { children: ReactNode }) {
+export function Tr({
+  children,
+  onClick,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+}) {
   return (
-    <tr className="transition-colors last:[&>td]:border-b-0 hover:bg-canvas/60">
+    <tr
+      onClick={onClick}
+      className={`transition-colors last:[&>td]:border-b-0 hover:bg-canvas/60 ${
+        onClick ? "cursor-pointer" : ""
+      }`}
+    >
       {children}
     </tr>
   );

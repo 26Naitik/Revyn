@@ -25,12 +25,14 @@ const MERCHANT_ID = "mer_demo_revyn";
 const CUSTOMER_AARAV = "cus_demo_aarav";
 const CUSTOMER_PRIYA = "cus_demo_priya";
 const CUSTOMER_ROHAN = "cus_demo_rohan";
+const CUSTOMER_KABIR = "cus_demo_kabir";
 
 const PLAN_PRO = "plan_demo_pro";
 
 const ORDER_PAID = "ord_demo_paid_1";
 const ORDER_ABANDONED = "ord_demo_abandoned";
 const ORDER_OVERDUE = "ord_demo_overdue";
+const ORDER_RECOVERED = "ord_demo_recovered";
 
 const PAY_HIST_1 = "pay_demo_hist_1";
 const PAY_SUB_1 = "pay_demo_sub_1";
@@ -38,6 +40,18 @@ const PAY_SUB_2 = "pay_demo_sub_2";
 const PAY_SUB_3 = "pay_demo_sub_3";
 const PAY_FAILED_CARD = "pay_demo_failed_card";
 const PAY_FAILED_INVOICE = "pay_demo_failed_invoice";
+
+/* Kabir - repeat-failure customer */
+const KABIR_OK_1 = "pay_demo_kabir_ok_1";
+const KABIR_OK_2 = "pay_demo_kabir_ok_2";
+const KABIR_OK_3 = "pay_demo_kabir_ok_3";
+const KABIR_FAIL_1 = "pay_demo_kabir_fail_1";
+const KABIR_FAIL_2 = "pay_demo_kabir_fail_2";
+const KABIR_FAIL_3 = "pay_demo_kabir_fail_3";
+
+/* Recovered-history artefacts (Aarav previously recovered successfully) */
+const RISK_RECOVERED = "risk_demo_recovered";
+const REC_RECOVERED = "rec_demo_recovered";
 
 const SUB_ROHAN = "sub_demo_rohan";
 
@@ -47,6 +61,8 @@ const AMT_499 = 49_900;
 const AMT_12400 = 1_240_000;
 const AMT_3299 = 329_900;
 const AMT_18500 = 1_850_000;
+const AMT_999 = 99_900;
+const AMT_8999 = 899_900;
 
 /* ================================================================ */
 /*  Main seed                                                       */
@@ -73,26 +89,37 @@ async function main() {
       name: "Aarav Sharma",
       email: "aarav.sharma@example.com",
       phone: "+919876543210",
+      createdAt: daysAgo(200),
     },
     {
       id: CUSTOMER_PRIYA,
       name: "Priya Patel",
       email: "priya.patel@example.com",
       phone: "+919876543211",
+      createdAt: daysAgo(120),
     },
     {
       id: CUSTOMER_ROHAN,
       name: "Rohan Mehta",
       email: "rohan.mehta@example.com",
       phone: "+919876543212",
+      createdAt: daysAgo(90),
+    },
+    {
+      id: CUSTOMER_KABIR,
+      name: "Kabir Singh",
+      email: "kabir.singh@example.com",
+      phone: "+919876543213",
+      createdAt: daysAgo(150),
     },
   ] as const;
 
   for (const c of customers) {
+    const { createdAt, ...fields } = c;
     await prisma.customer.upsert({
       where: { id: c.id },
-      create: { ...c, merchantId: MERCHANT_ID },
-      update: {},
+      create: { ...fields, merchantId: MERCHANT_ID, createdAt },
+      update: { createdAt },
     });
   }
 
@@ -267,16 +294,154 @@ async function main() {
     },
   });
 
+  /* 8. Previously-recovered case (Aarav) - proves recovery history ---- */
+  await prisma.order.upsert({
+    where: { id: ORDER_RECOVERED },
+    create: {
+      id: ORDER_RECOVERED,
+      merchantId: MERCHANT_ID,
+      customerId: CUSTOMER_AARAV,
+      razorpayOrderId: "order_demo_rzp_1004",
+      amount: AMT_2499,
+      currency: "INR",
+      status: "paid",
+      createdAt: daysAgo(21),
+    },
+    update: {
+      createdAt: daysAgo(21),
+    },
+  });
+
+  const recoveredRisk = await prisma.revenueAtRisk.upsert({
+    where: { id: RISK_RECOVERED },
+    create: {
+      id: RISK_RECOVERED,
+      merchantId: MERCHANT_ID,
+      orderId: ORDER_RECOVERED,
+      type: "overdue_receivable",
+      amountAtRisk: AMT_2499,
+      currency: "INR",
+      status: "recovered",
+      rootCause: "overdue_receivable",
+      confidenceScore: 0.65,
+      createdAt: daysAgo(20),
+      updatedAt: daysAgo(19),
+    },
+    update: {
+      status: "recovered",
+      createdAt: daysAgo(20),
+      updatedAt: daysAgo(19),
+    },
+  });
+
+  await prisma.recoveryWorkflow.upsert({
+    where: { revenueRiskId: recoveredRisk.id },
+    create: {
+      id: REC_RECOVERED,
+      revenueRiskId: recoveredRisk.id,
+      strategy: "send_payment_link",
+      aiDecisionReason:
+        "Overdue receivable from a reliable customer. Payment link sent and settled.",
+      status: "succeeded",
+      razorpayActionId: "plink_demo_recovered_001",
+      amountRecovered: AMT_2499,
+      startedAt: daysAgo(20),
+      completedAt: daysAgo(19),
+      createdAt: daysAgo(20),
+      recoveryScore: 78,
+      confidence: 0.85,
+      priority: "high",
+      decisionSource: "rules",
+    },
+    update: {
+      status: "succeeded",
+      createdAt: daysAgo(20),
+    },
+  });
+
+  /* 9. Kabir - repeat-failure, high-risk customer --------------------- */
+  /* three settled payments in the distant past */
+  for (const [id, dayOffset] of [
+    [KABIR_OK_1, 140],
+    [KABIR_OK_2, 120],
+    [KABIR_OK_3, 100],
+  ] as const) {
+    await prisma.payment.upsert({
+      where: { id },
+      create: {
+        id,
+        merchantId: MERCHANT_ID,
+        customerId: CUSTOMER_KABIR,
+        razorpayPaymentId: `pay_rzp_demo_kabir_ok_${id.split("_").pop()}`,
+        amount: AMT_999,
+        status: "captured",
+        method: "card",
+        captured: true,
+        createdAt: daysAgo(dayOffset),
+      },
+      update: {
+        createdAt: daysAgo(dayOffset),
+      },
+    });
+  }
+
+  /* two older failures + one fresh high-value failure */
+  const kabirFailures = [
+    { id: KABIR_FAIL_1, reason: "insufficient_funds", at: daysAgo(12) },
+    { id: KABIR_FAIL_2, reason: "card_declined", at: daysAgo(6) },
+    { id: KABIR_FAIL_3, reason: "card_declined", at: hoursAgo(2) },
+  ] as const;
+
+  for (const failure of kabirFailures) {
+    await prisma.payment.upsert({
+      where: { id: failure.id },
+      create: {
+        id: failure.id,
+        merchantId: MERCHANT_ID,
+        customerId: CUSTOMER_KABIR,
+        razorpayPaymentId: `pay_rzp_demo_kabir_fail_${failure.id.split("_").pop()}`,
+        amount: failure.id === KABIR_FAIL_3 ? AMT_8999 : AMT_999,
+        status: "failed",
+        method: "card",
+        errorCode: "EC_002",
+        errorReason: failure.reason,
+        errorDescription:
+          failure.reason === "insufficient_funds"
+            ? "Insufficient funds in account"
+            : "Card was declined by the issuing bank",
+        errorSource: "customer",
+        errorStep: "authorization",
+        createdAt: failure.at,
+      },
+      update: {
+        createdAt: failure.at,
+      },
+    });
+  }
+
   /* ---- summary -------------------------------------------------- */
   const [merchantCount, customerCount, planCount, orderCount, paymentCount, subCount] =
     await Promise.all([
       prisma.merchant.count({ where: { id: MERCHANT_ID } }),
       prisma.customer.count({
-        where: { id: { in: [CUSTOMER_AARAV, CUSTOMER_PRIYA, CUSTOMER_ROHAN] } },
+        where: {
+          id: {
+            in: [CUSTOMER_AARAV, CUSTOMER_PRIYA, CUSTOMER_ROHAN, CUSTOMER_KABIR],
+          },
+        },
       }),
       prisma.plan.count({ where: { id: PLAN_PRO } }),
       prisma.order.count({
-        where: { id: { in: [ORDER_PAID, ORDER_ABANDONED, ORDER_OVERDUE] } },
+        where: {
+          id: {
+            in: [
+              ORDER_PAID,
+              ORDER_ABANDONED,
+              ORDER_OVERDUE,
+              ORDER_RECOVERED,
+            ],
+          },
+        },
       }),
       prisma.payment.count({
         where: {
@@ -288,6 +453,12 @@ async function main() {
               PAY_SUB_3,
               PAY_FAILED_CARD,
               PAY_FAILED_INVOICE,
+              KABIR_OK_1,
+              KABIR_OK_2,
+              KABIR_OK_3,
+              KABIR_FAIL_1,
+              KABIR_FAIL_2,
+              KABIR_FAIL_3,
             ],
           },
         },
@@ -310,6 +481,8 @@ async function main() {
   console.log("  b) abandoned checkout ₹3,299 (45 min old)");
   console.log("  c) halted subscription (6 cycles × ₹499 = ₹2,994 at risk)");
   console.log("  d) overdue receivable ₹18,500 (2 days old)");
+  console.log("  e) repeat-failure customer Kabir (3 recent failures, ₹8,999 fresh)");
+  console.log("  f) previously-recovered customer Aarav (history for scoring)");
   console.log("");
   console.log("Run `npm run db:seed && npm run dev` then:");
   console.log("  POST /api/pipeline — detect → diagnose → decide");

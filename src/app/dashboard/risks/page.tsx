@@ -24,6 +24,30 @@ function severityOf(row: RiskRow): RiskViewRow["severity"] {
   return "low";
 }
 
+function toDecisionInfo(
+  decision: RiskRow["decision"]
+): RiskViewRow["decision"] {
+  if (!decision) return null;
+  return {
+    recoveryId: decision.recoveryId,
+    strategy: decision.strategy,
+    workflowStatus: decision.workflowStatus,
+    reasoning: decision.reasoning,
+    confidencePercent: Math.round(decision.confidence * 100),
+    recoveryScore: decision.recoveryScore,
+    priority: decision.priority,
+    nextStep: decision.nextStep,
+    source: decision.source,
+    factors: [...decision.factors]
+      .sort((a, b) => b.contribution - a.contribution)
+      .map((factor) => ({
+        label: factor.label,
+        contribution: factor.contribution,
+        detail: factor.detail,
+      })),
+  };
+}
+
 function toViewRow(row: RiskRow, now: Date): RiskViewRow {
   return {
     id: row.id,
@@ -41,6 +65,7 @@ function toViewRow(row: RiskRow, now: Date): RiskViewRow {
     customerName: row.customerName,
     customerEmail: row.customerEmail,
     severity: severityOf(row),
+    decision: toDecisionInfo(row.decision),
   };
 }
 

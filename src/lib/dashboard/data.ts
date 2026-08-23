@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { parseStoredFactors } from "@/lib/engine/scoring";
+import type { RecoveryFactor } from "@/lib/types";
 
 export {
   PAYMENT_LINK_ELIGIBLE_STRATEGIES,
@@ -21,6 +23,21 @@ export interface RecoveryRow {
   customerEmail: string | null;
 }
 
+export interface RiskDecisionView {
+  recoveryId: string;
+  strategy: string;
+  workflowStatus: string;
+  reasoning: string;
+  confidence: number;
+  recoveryScore: number;
+  priority: string;
+  discountPercent: number;
+  retryDelay: string | null;
+  nextStep: string | null;
+  factors: RecoveryFactor[];
+  source: string;
+}
+
 export interface RiskRow {
   id: string;
   type: string;
@@ -32,6 +49,7 @@ export interface RiskRow {
   createdAt: Date;
   customerName: string | null;
   customerEmail: string | null;
+  decision: RiskDecisionView | null;
 }
 
 export interface ActivityRow {
@@ -131,6 +149,22 @@ export async function listRecentRisks(limit = 50): Promise<RiskRow[]> {
       payment: ENTITY_WITH_CUSTOMER_SELECT,
       order: ENTITY_WITH_CUSTOMER_SELECT,
       subscription: ENTITY_WITH_CUSTOMER_SELECT,
+      recovery: {
+        select: {
+          id: true,
+          strategy: true,
+          status: true,
+          aiDecisionReason: true,
+          confidence: true,
+          recoveryScore: true,
+          priority: true,
+          discountPercent: true,
+          retryDelay: true,
+          nextStep: true,
+          factors: true,
+          decisionSource: true,
+        },
+      },
     },
   });
 
@@ -152,6 +186,22 @@ export async function listRecentRisks(limit = 50): Promise<RiskRow[]> {
       createdAt: risk.createdAt,
       customerName: customer?.name ?? null,
       customerEmail: customer?.email ?? null,
+      decision: risk.recovery
+        ? {
+            recoveryId: risk.recovery.id,
+            strategy: risk.recovery.strategy,
+            workflowStatus: risk.recovery.status,
+            reasoning: risk.recovery.aiDecisionReason,
+            confidence: risk.recovery.confidence,
+            recoveryScore: risk.recovery.recoveryScore,
+            priority: risk.recovery.priority,
+            discountPercent: risk.recovery.discountPercent,
+            retryDelay: risk.recovery.retryDelay,
+            nextStep: risk.recovery.nextStep,
+            factors: parseStoredFactors(risk.recovery.factors),
+            source: risk.recovery.decisionSource,
+          }
+        : null,
     };
   });
 }

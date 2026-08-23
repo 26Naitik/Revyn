@@ -14,6 +14,29 @@ import {
   IconAlertTriangle,
   IconSearch,
 } from "@/components/ui/icons";
+import { labelStrategy } from "@/lib/format";
+import { DecideButton } from "@/components/dashboard/DecideButton";
+import {
+  DecisionDrawer,
+  type DecisionDetailView,
+} from "@/components/dashboard/DecisionDrawer";
+
+export interface RiskDecisionInfo {
+  recoveryId: string;
+  strategy: string;
+  workflowStatus: string;
+  reasoning: string;
+  confidencePercent: number;
+  recoveryScore: number;
+  priority: string;
+  nextStep: string | null;
+  source: string;
+  factors: Array<{
+    label: string;
+    contribution: number;
+    detail: string;
+  }>;
+}
 
 export interface RiskViewRow {
   id: string;
@@ -28,6 +51,13 @@ export interface RiskViewRow {
   customerName: string | null;
   customerEmail: string | null;
   severity: "high" | "medium" | "low";
+  decision: RiskDecisionInfo | null;
+}
+
+function scoreChipClass(score: number): string {
+  if (score >= 70) return "bg-brand-soft text-brand-dark ring-brand/20";
+  if (score >= 40) return "bg-amber-50 text-amber-700 ring-amber-600/20";
+  return "bg-red-50 text-red-700 ring-red-600/20";
 }
 
 const FILTERS = [
@@ -56,6 +86,12 @@ function SeverityDot({ level }: { level: "high" | "medium" | "low" }) {
 export function RisksExplorer({ rows }: { rows: RiskViewRow[] }) {
   const [filter, setFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
+  const [drawerRiskId, setDrawerRiskId] = useState<string | null>(null);
+
+  const drawerRow = useMemo(
+    () => rows.find((row) => row.id === drawerRiskId && row.decision) ?? null,
+    [rows, drawerRiskId]
+  );
 
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -174,7 +210,10 @@ export function RisksExplorer({ rows }: { rows: RiskViewRow[] }) {
           </thead>
           <tbody>
             {visible.map((row) => (
-              <Tr key={row.id}>
+              <Tr
+                key={row.id}
+                onClick={row.decision ? () => setDrawerRiskId(row.id) : undefined}
+              >
                   <Td>
                     {row.customerName ? (
                       <>
@@ -231,7 +270,28 @@ export function RisksExplorer({ rows }: { rows: RiskViewRow[] }) {
                     <Badge status={row.status} />
                   </Td>
                   <Td align="right">
-                    <span className="text-xs text-faint">—</span>
+                    {row.decision ? (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink">
+                          {labelStrategy(row.decision.strategy)}
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset ${scoreChipClass(
+                              row.decision.recoveryScore
+                            )}`}
+                          >
+                            {Math.round(row.decision.recoveryScore)}
+                          </span>
+                        </span>
+                        <span className="text-[11px] leading-4 text-faint">
+                          {row.decision.source === "ai" ? "AI-reviewed" : "Rule-based"}{" "}
+                          · {row.decision.confidencePercent}% confidence
+                        </span>
+                      </div>
+                    ) : row.status === "detected" || row.status === "diagnosing" ? (
+                      <DecideButton riskId={row.id} />
+                    ) : (
+                      <span className="text-xs text-faint">—</span>
+                    )}
                   </Td>
                 </Tr>
             ))}
@@ -243,6 +303,26 @@ export function RisksExplorer({ rows }: { rows: RiskViewRow[] }) {
         <p className="text-xs text-faint">
           Showing {visible.length} of {rows.length} tracked risks.
         </p>
+      )}
+
+      {drawerRow?.decision && (
+        <DecisionDrawer
+          title={drawerRow.customerName ?? "Unlinked customer"}
+          subtitle={`${drawerRow.typeLabel} · ${drawerRow.amountLabel}`}
+          decision={
+            {
+              strategyLabel: labelStrategy(drawerRow.decision.strategy),
+              reasoning: drawerRow.decision.reasoning,
+              confidencePercent: drawerRow.decision.confidencePercent,
+              recoveryScore: drawerRow.decision.recoveryScore,
+              priority: drawerRow.decision.priority,
+              nextStep: drawerRow.decision.nextStep,
+              source: drawerRow.decision.source,
+              factors: drawerRow.decision.factors,
+            } satisfies DecisionDetailView
+          }
+          onClose={() => setDrawerRiskId(null)}
+        />
       )}
     </div>
   );

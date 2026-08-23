@@ -135,6 +135,14 @@ model RecoveryWorkflow {
   status            String         @default("pending")
   razorpayActionId  String?
   amountRecovered   Int            @default(0)
+  recoveryScore     Float          @default(0)
+  confidence        Float          @default(0)
+  priority          String         @default("medium")
+  discountPercent   Float          @default(0)
+  retryDelay        String?
+  nextStep          String?
+  factors           Json?
+  decisionSource    String         @default("rules")
   startedAt         DateTime?
   completedAt       DateTime?
   createdAt         DateTime       @default(now())
