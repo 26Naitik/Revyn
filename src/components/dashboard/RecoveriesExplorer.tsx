@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CreatePaymentLinkButton } from "@/components/dashboard/CreatePaymentLinkButton";
+import { RecoveryDetailDrawer } from "@/components/dashboard/RecoveryDetailDrawer";
 import { RetryButton } from "@/components/dashboard/RetryButton";
 import { Badge } from "@/components/ui/Badge";
 import {
@@ -32,10 +33,14 @@ export interface RecoveryViewRow {
   lastAttemptFull: string | null;
   nextRetryLabel: string | null;
   nextRetryFull: string | null;
+  nextRetryAtRaw: string | null;
+  amountAtRiskRaw: number;
   failureReason: string | null;
   failureCategoryLabel: string | null;
   retryable: boolean;
 }
+
+const HIGH_VALUE_THRESHOLD_PAISE = 50_000_00;
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -48,13 +53,42 @@ const STATUS_FILTERS = [
   { key: "cancelled", label: "Cancelled" },
 ] as const;
 
+const QUICK_FILTERS = [
+  { key: "high_value", label: "High value" },
+  { key: "needs_attention", label: "Needs attention" },
+] as const;
+
+function isNeedsAttention(row: RecoveryViewRow, now: number): boolean {
+  if (["failed", "escalated"].includes(row.status)) return true;
+  if (
+    row.status === "retry_scheduled" &&
+    row.nextRetryAtRaw !== null &&
+    new Date(row.nextRetryAtRaw).getTime() <= now
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function RecoveriesExplorer({
   rows,
 }: {
   rows: RecoveryViewRow[];
 }) {
   const [filter, setFilter] = useState<string>("all");
+  const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
+  const [nowMs] = useState(() => Date.now());
+
+  // Deep-link support: /dashboard/recoveries?case=<id> opens the drawer.
+  // Deferred by a tick so the effect doesn't synchronously cascade renders.
+  useEffect(() => {
+    const caseId = new URLSearchParams(window.location.search).get("case");
+    if (!caseId) return;
+    const timer = window.setTimeout(() => setOpenCaseId(caseId), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -64,10 +98,24 @@ export function RecoveriesExplorer({
     return map;
   }, [rows]);
 
+  const quickCounts = useMemo(
+    () => ({
+      high_value: rows.filter((r) => r.amountAtRiskRaw >= HIGH_VALUE_THRESHOLD_PAISE).length,
+      needs_attention: rows.filter((r) => isNeedsAttention(r, nowMs)).length,
+    }),
+    [rows, nowMs]
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((row) => {
       if (filter !== "all" && row.status !== filter) return false;
+      if (quickFilter === "high_value" && row.amountAtRiskRaw < HIGH_VALUE_THRESHOLD_PAISE) {
+        return false;
+      }
+      if (quickFilter === "needs_attention" && !isNeedsAttention(row, nowMs)) {
+        return false;
+      }
       if (!q) return true;
       return (
         row.customerName?.toLowerCase().includes(q) ||
@@ -76,7 +124,7 @@ export function RecoveriesExplorer({
         row.status.toLowerCase().includes(q)
       );
     });
-  }, [rows, filter, query]);
+  }, [rows, filter, quickFilter, query, nowMs]);
 
   return (
     <div className="space-y-3">
@@ -117,16 +165,42 @@ export function RecoveriesExplorer({
           })}
         </div>
 
-        <label className="relative block lg:w-72">
-          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search customer or strategy…"
-            className="h-9 w-full rounded-lg border border-line bg-surface pl-9 pr-3 text-[13px] text-ink placeholder:text-faint focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            {QUICK_FILTERS.map((f) => {
+              const active = quickFilter === f.key;
+              const count = quickCounts[f.key as keyof typeof quickCounts];
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setQuickFilter(active ? null : f.key)}
+                  aria-pressed={active}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    active
+                      ? "border-brand/30 bg-brand-soft text-brand-dark"
+                      : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink"
+                  }`}
+                >
+                  {f.label}
+                  <span className="rounded-full bg-line/70 px-1 text-[10px] tabular-nums">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="relative block lg:w-72">
+            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search customer or strategy…"
+              className="h-9 w-full rounded-lg border border-line bg-surface pl-9 pr-3 text-[13px] text-ink placeholder:text-faint focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+            />
+          </label>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -169,7 +243,10 @@ export function RecoveriesExplorer({
           </thead>
           <tbody>
             {visible.map((row) => (
-              <Tr key={row.recoveryId}>
+              <Tr
+                key={row.recoveryId}
+                onClick={() => setOpenCaseId(row.recoveryId)}
+              >
                 <Td>
                   {row.customerName ? (
                     <>
@@ -261,8 +338,16 @@ export function RecoveriesExplorer({
 
       {rows.length > 0 && visible.length > 0 && (
         <p className="text-xs text-faint">
-          Showing {visible.length} of {rows.length} recovery workflows.
+          Showing {visible.length} of {rows.length} recovery workflows. Click a row for the full case detail.
         </p>
+      )}
+
+      {openCaseId && (
+        <RecoveryDetailDrawer
+          key={openCaseId}
+          recoveryId={openCaseId}
+          onClose={() => setOpenCaseId(null)}
+        />
       )}
     </div>
   );

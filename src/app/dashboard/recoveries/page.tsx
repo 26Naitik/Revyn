@@ -41,6 +41,8 @@ function toViewRow(row: RecoveryRow, now: Date): RecoveryViewRow {
         : null,
     nextRetryFull:
       row.nextRetryAt !== null ? formatDateTime(row.nextRetryAt) : null,
+    nextRetryAtRaw: row.nextRetryAt?.toISOString() ?? null,
+    amountAtRiskRaw: row.amountAtRisk,
     failureReason: row.lastFailureReason,
     failureCategoryLabel: row.lastFailureCategory
       ? FAILURE_CATEGORY_LABELS[row.lastFailureCategory] ?? row.lastFailureCategory

@@ -527,6 +527,127 @@ async function main() {
     });
   }
 
+  /* 11. Command-center demo states ------------------------------------ */
+  /* a) live payment link awaiting settlement (stale-execution attention) */
+  const abandonedRisk = await prisma.revenueAtRisk.findFirst({
+    where: { orderId: ORDER_ABANDONED },
+  });
+
+  if (abandonedRisk) {
+    await prisma.recoveryWorkflow.upsert({
+      where: { revenueRiskId: abandonedRisk.id },
+      create: {
+        revenueRiskId: abandonedRisk.id,
+        strategy: "send_payment_link",
+        aiDecisionReason:
+          "Checkout abandoned at payment step; a one-click link recovers intent quickly.",
+        status: "executing",
+        razorpayActionId: "plink_demo_live_001",
+        attemptCount: 1,
+        lastAttemptAt: minutesAgo(45),
+        startedAt: minutesAgo(45),
+        lastFailureReason: null,
+        lastFailureCategory: null,
+        createdAt: hoursAgo(2),
+        recoveryScore: 81,
+        confidence: 0.88,
+        priority: "high",
+        decisionSource: "rules",
+      },
+      update: {
+        status: "executing",
+        razorpayActionId: "plink_demo_live_001",
+        attemptCount: 1,
+        lastAttemptAt: minutesAgo(45),
+        startedAt: minutesAgo(45),
+        amountRecovered: 0,
+      },
+    });
+    await prisma.revenueAtRisk.update({
+      where: { id: abandonedRisk.id },
+      data: { status: "recovering" },
+    });
+  }
+
+  /* b) exhausted retries on the halted subscription (write-off risk) */
+  const subscriptionRisk = await prisma.revenueAtRisk.findFirst({
+    where: { subscriptionId: SUB_ROHAN },
+  });
+
+  if (subscriptionRisk) {
+    await prisma.recoveryWorkflow.upsert({
+      where: { revenueRiskId: subscriptionRisk.id },
+      create: {
+        revenueRiskId: subscriptionRisk.id,
+        strategy: "retry_payment",
+        aiDecisionReason:
+          "Recurring charge failed; retries are cheap while the mandate is still active.",
+        status: "failed",
+        attemptCount: 3,
+        lastAttemptAt: daysAgo(1),
+        lastFailureReason: "payment_link_expired",
+        lastFailureCategory: "temporary",
+        nextRetryAt: null,
+        completedAt: daysAgo(1),
+        createdAt: daysAgo(5),
+        recoveryScore: 58,
+        confidence: 0.62,
+        priority: "medium",
+        decisionSource: "ai",
+      },
+      update: {
+        status: "failed",
+        attemptCount: 3,
+        lastAttemptAt: daysAgo(1),
+        lastFailureReason: "payment_link_expired",
+        lastFailureCategory: "temporary",
+        nextRetryAt: null,
+        amountRecovered: 0,
+      },
+    });
+    await prisma.revenueAtRisk.update({
+      where: { id: subscriptionRisk.id },
+      data: { status: "decided" },
+    });
+  }
+
+  /* c) decided but not yet executed high-value case */
+  const kabirFreshRisk = await prisma.revenueAtRisk.findFirst({
+    where: { paymentId: KABIR_FAIL_3 },
+  });
+
+  if (kabirFreshRisk) {
+    await prisma.recoveryWorkflow.upsert({
+      where: { revenueRiskId: kabirFreshRisk.id },
+      create: {
+        revenueRiskId: kabirFreshRisk.id,
+        strategy: "offer_discount",
+        aiDecisionReason:
+          "Third decline in two weeks; a 10% incentive plus a fresh instrument maximises conversion.",
+        discountPercent: 10,
+        status: "pending",
+        attemptCount: 0,
+        createdAt: hoursAgo(2),
+        recoveryScore: 64,
+        confidence: 0.71,
+        priority: "high",
+        decisionSource: "ai",
+      },
+      update: {
+        status: "pending",
+        strategy: "offer_discount",
+        discountPercent: 10,
+        attemptCount: 0,
+        razorpayActionId: null,
+        amountRecovered: 0,
+      },
+    });
+    await prisma.revenueAtRisk.update({
+      where: { id: kabirFreshRisk.id },
+      data: { status: "decided" },
+    });
+  }
+
   /* ---- summary -------------------------------------------------- */
   const [merchantCount, customerCount, planCount, orderCount, paymentCount, subCount] =
     await Promise.all([
@@ -593,6 +714,9 @@ async function main() {
   console.log("  f) previously-recovered customer Aarav (history for scoring)");
   console.log("  g) retry_scheduled workflow (link expired, next retry in ~12h)");
   console.log("  h) escalated workflow (3 failed attempts, permanent failure)");
+  console.log("  i) executing workflow with a live link awaiting settlement");
+  console.log("  j) failed workflow after exhausted retries (subscription)");
+  console.log("  k) pending high-value decision awaiting execution");
   console.log("");
   console.log("Run `npm run db:seed && npm run dev` then:");
   console.log("  POST /api/pipeline — detect → diagnose → decide");
