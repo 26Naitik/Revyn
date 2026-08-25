@@ -1,0 +1,22 @@
+[33m15c1165[m feat: complete phase 1 ai recovery decision engine
+.env.example
+prisma/schema.prisma
+prisma/seed.ts
+src/app/api/recover/decide/route.ts
+src/app/dashboard/risks/page.tsx
+src/components/dashboard/DecideButton.tsx
+src/components/dashboard/DecisionDrawer.tsx
+src/components/dashboard/RisksExplorer.tsx
+src/components/ui/Table.tsx
+src/lib/__tests__/ai-reasoning.test.ts
+src/lib/__tests__/decision-rules.test.ts
+src/lib/__tests__/scoring.test.ts
+src/lib/ai/client.ts
+src/lib/ai/config.ts
+src/lib/ai/reasoning.ts
+src/lib/dashboard/data.ts
+src/lib/engine/context.ts
+src/lib/engine/decide.ts
+src/lib/engine/decision-rules.ts
+src/lib/engine/scoring.ts
+src/lib/types/index.ts

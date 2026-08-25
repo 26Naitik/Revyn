@@ -45,6 +45,17 @@ export async function checkMaxAttemptsPerRisk(
   return { allowed: true, rule: "max_attempts_per_risk", reason: "OK" };
 }
 
+/** A customer owns risks via any linked payment, subscription or order. */
+function customerRiskScope(customerId: string) {
+  return {
+    OR: [
+      { payment: { customerId } },
+      { subscription: { customerId } },
+      { order: { customerId } },
+    ],
+  };
+}
+
 export async function checkMaxRetriesPerCustomer(
   customerId: string,
   overrides?: Partial<GuardrailLimit>
@@ -54,13 +65,7 @@ export async function checkMaxRetriesPerCustomer(
   const retryCount = await prisma.auditLog.count({
     where: {
       action: "recover",
-      revenueRisk: {
-        OR: [
-          { payment: { customerId } },
-          { subscription: { customerId } },
-          { order: { customerId } },
-        ],
-      },
+      revenueRisk: customerRiskScope(customerId),
     },
   });
 
@@ -73,6 +78,75 @@ export async function checkMaxRetriesPerCustomer(
   }
 
   return { allowed: true, rule: "max_retries_per_customer", reason: "OK" };
+}
+
+/**
+ * Rate limit: at most N payment links per customer per rolling 7-day window.
+ * Counts real execution events from the audit trail.
+ */
+export async function checkMaxPaymentLinksPerWeek(
+  customerId: string,
+  overrides?: Partial<GuardrailLimit>
+): Promise<GuardrailResult> {
+  const max =
+    overrides?.maxPaymentLinksPerWeek ?? limits.maxPaymentLinksPerWeek;
+  const since = new Date(Date.now() - 7 * 86_400_000);
+
+  const recentLinks = await prisma.auditLog.count({
+    where: {
+      action: "recover",
+      createdAt: { gte: since },
+      details: { contains: "payment_link_created" },
+      revenueRisk: customerRiskScope(customerId),
+    },
+  });
+
+  if (recentLinks >= max) {
+    return {
+      allowed: false,
+      rule: "max_payment_links_per_week",
+      reason: `Customer ${customerId} received ${recentLinks} payment links in the last 7 days (max: ${max})`,
+    };
+  }
+
+  return { allowed: true, rule: "max_payment_links_per_week", reason: "OK" };
+}
+
+/**
+ * Rate limit: at most N discounted decisions per customer per rolling 30-day
+ * window. Counts persisted workflows whose decision actually included a
+ * discount - no invented data.
+ */
+export async function checkMaxDiscountsPerCustomerPerMonth(
+  customerId: string,
+  overrides?: Partial<GuardrailLimit>
+): Promise<GuardrailResult> {
+  const max =
+    overrides?.maxDiscountPerCustomerPerMonth ??
+    limits.maxDiscountPerCustomerPerMonth;
+  const since = new Date(Date.now() - 30 * 86_400_000);
+
+  const recentDiscounts = await prisma.recoveryWorkflow.count({
+    where: {
+      discountPercent: { gt: 0 },
+      createdAt: { gte: since },
+      revenueRisk: customerRiskScope(customerId),
+    },
+  });
+
+  if (recentDiscounts >= max) {
+    return {
+      allowed: false,
+      rule: "max_discount_per_customer_per_month",
+      reason: `Customer ${customerId} already received ${recentDiscounts} discount decision(s) in the last 30 days (max: ${max})`,
+    };
+  }
+
+  return {
+    allowed: true,
+    rule: "max_discount_per_customer_per_month",
+    reason: "OK",
+  };
 }
 
 export async function checkMinRecoveryAmount(
@@ -186,6 +260,8 @@ export async function runAllGuardrails(
   const checks = await Promise.all([
     checkMaxAttemptsPerRisk(riskId, overrides),
     checkMaxRetriesPerCustomer(customerId, overrides),
+    checkMaxPaymentLinksPerWeek(customerId, overrides),
+    checkMaxDiscountsPerCustomerPerMonth(customerId, overrides),
     checkMinRecoveryAmount(amountPaise, overrides),
     checkMerchantBudget(merchantId, overrides),
     checkCooldown(riskId, overrides),

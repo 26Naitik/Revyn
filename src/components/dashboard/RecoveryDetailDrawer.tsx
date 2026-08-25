@@ -15,7 +15,10 @@ import { RetryButton } from "@/components/dashboard/RetryButton";
 import { CreatePaymentLinkButton } from "@/components/dashboard/CreatePaymentLinkButton";
 import { formatDateTime, formatINR, formatPercent, labelRiskType, labelStrategy } from "@/lib/format";
 import type { RecoveryFactor } from "@/lib/types";
-import type { TimelineEvent } from "@/lib/dashboard/timeline";
+import type {
+  TimelineEvent,
+  TimelineTrustSignals,
+} from "@/lib/dashboard/timeline";
 
 interface CaseDetail {
   recoveryId: string;
@@ -52,6 +55,7 @@ interface CaseDetailPayload {
   ok: true;
   case: CaseDetail;
   events: TimelineEvent[];
+  trust: TimelineTrustSignals;
 }
 
 const KIND_STYLES: Record<TimelineEvent["kind"], { dot: string; label: string }> = {
@@ -62,6 +66,78 @@ const KIND_STYLES: Record<TimelineEvent["kind"], { dot: string; label: string }>
   guardrail: { dot: "bg-amber-500", label: "Guardrail" },
   system: { dot: "bg-slate-400", label: "System" },
 };
+
+function TrustChip({
+  tone,
+  children,
+}: {
+  tone: "brand" | "warning" | "danger" | "neutral" | "success";
+  children: React.ReactNode;
+}) {
+  const tones: Record<string, string> = {
+    brand: "border-brand/25 bg-brand-soft text-brand-dark",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warning: "border-amber-200 bg-amber-50 text-amber-700",
+    danger: "border-danger-soft bg-danger-soft text-danger",
+    neutral: "border-line bg-canvas text-muted",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${tones[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Consolidated trust signals derived from real audit events only.
+ * Answers: WHO decided (AI vs rules), were guardrails triggered, was
+ * webhook traffic duplicated, and how healthy the outcome looks.
+ */
+function TrustStrip({ trust }: { trust: TimelineTrustSignals }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-5 py-3">
+      {trust.decisionSource === "ai" && (
+        <TrustChip tone="brand">
+          AI-assisted decision
+        </TrustChip>
+      )}
+      {trust.decisionSource === "rules" && (
+        <TrustChip tone="neutral">Rule-based decision</TrustChip>
+      )}
+      {trust.hasSuccessfulOutcome && (
+        <TrustChip tone="success">Recovered via link</TrustChip>
+      )}
+      {trust.maxAttemptNumber !== null && (
+        <TrustChip tone="neutral">
+          Attempt {trust.maxAttemptNumber}/3
+        </TrustChip>
+      )}
+      {trust.guardrailBlocks > 0 && (
+        <TrustChip tone="danger">
+          Guardrail blocked ×{trust.guardrailBlocks}
+        </TrustChip>
+      )}
+      {trust.guardrailWarnings > 0 && (
+        <TrustChip tone="warning">
+          Guardrail warnings ×{trust.guardrailWarnings}
+        </TrustChip>
+      )}
+      {trust.duplicateWebhooksSuppressed > 0 && (
+        <TrustChip tone="warning">
+          Duplicate webhooks ×{trust.duplicateWebhooksSuppressed}
+        </TrustChip>
+      )}
+      {trust.failedEvents > 0 && (
+        <TrustChip tone="danger">Failures ×{trust.failedEvents}</TrustChip>
+      )}
+      {trust.warningEvents > 0 && trust.failedEvents === 0 && (
+        <TrustChip tone="warning">Warnings ×{trust.warningEvents}</TrustChip>
+      )}
+    </div>
+  );
+}
 
 function DetailSection({
   question,
@@ -229,6 +305,8 @@ export function RecoveryDetailDrawer({
         )}
 
         {!data && !error && <LoadingState rows={6} />}
+
+        {data?.trust && <TrustStrip trust={data.trust} />}
 
         {detail && (
           <>

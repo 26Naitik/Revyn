@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseStoredFactors } from "@/lib/engine/scoring";
 import { parseAuditDetails, type ActivityRow } from "@/lib/dashboard/data";
-import { buildRecoveryTimeline } from "@/lib/dashboard/timeline";
+import {
+  buildRecoveryTimeline,
+  extractTrustSignals,
+} from "@/lib/dashboard/timeline";
 import type { RecoveryFactor } from "@/lib/types";
 
 /**
@@ -116,8 +119,11 @@ export async function GET(
     }
   }
 
+  const timelineEvents = buildRecoveryTimeline(activityRows);
+
   return NextResponse.json({
     ok: true,
+    trust: extractTrustSignals(timelineEvents),
     case: {
       recoveryId: workflow.id,
       riskId: workflow.revenueRiskId,
@@ -156,6 +162,6 @@ export async function GET(
               category: workflow.lastFailureCategory,
             },
     },
-    events: buildRecoveryTimeline(activityRows),
+    events: timelineEvents,
   });
 }

@@ -8,6 +8,16 @@ import type { ActivityRow } from "@/lib/dashboard/data";
  * so the timeline always reflects the audit trail 1:1.
  */
 
+export interface TimelineDecisionMeta {
+  strategy: string | null;
+  recoveryScore: number | null;
+  confidence: number | null;
+  /** "ai" | "rules" - derived exactly as the engine labelled it. */
+  source: "ai" | "rules" | null;
+  priority: string | null;
+  nextStep: string | null;
+}
+
 export interface TimelineEvent {
   id: string;
   /** ISO timestamp of the underlying audit row. */
@@ -22,6 +32,11 @@ export interface TimelineEvent {
   actor: string;
   kind: "lifecycle" | "decision" | "execution" | "webhook" | "guardrail" | "system";
   status: "success" | "warning" | "failure";
+  /**
+   * Explainability payload present only on decision events, extracted from
+   * what decide.ts actually persisted. Never synthesised.
+   */
+  decision?: TimelineDecisionMeta;
 }
 
 const EVENT_TITLES: Record<string, string> = {
@@ -84,6 +99,26 @@ function kindFor(action: string, actor: string): TimelineEvent["kind"] {
   }
 }
 
+function decisionMetaFor(details: Record<string, unknown>): TimelineDecisionMeta | undefined {
+  const hasAny =
+    "strategy" in details ||
+    "recoveryScore" in details ||
+    "confidence" in details;
+  if (!hasAny) return undefined;
+
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+
+  return {
+    strategy: typeof details.strategy === "string" ? details.strategy : null,
+    recoveryScore: num(details.recoveryScore),
+    confidence: num(details.confidence),
+    source: details.source === "ai" ? "ai" : details.source === "rules" ? "rules" : null,
+    priority: typeof details.priority === "string" ? details.priority : null,
+    nextStep: typeof details.nextStep === "string" ? details.nextStep : null,
+  };
+}
+
 /**
  * Orders audit rows oldest-first and maps them to display events.
  * Accepts the shared ActivityRow shape so it composes with dashboard/data.ts.
@@ -123,7 +158,79 @@ export function buildRecoveryTimeline(rows: ActivityRow[]): TimelineEvent[] {
       attemptNumber,
       actor: row.actor,
       kind: kindFor(row.action, row.actor),
-      status: row.status === "success" || row.status === "warning" ? row.status : "failure",
+      status:
+        row.status === "success" || row.status === "warning"
+          ? row.status
+          : ("failure" as const),
+      ...(row.action === "decide"
+        ? { decision: decisionMetaFor(details) }
+        : {}),
     } satisfies TimelineEvent;
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Trust signals (Phase 4)                                             */
+/* ------------------------------------------------------------------ */
+
+export interface TimelineTrustSignals {
+  /** Decision provenance of the latest decide event, if any. */
+  decisionSource: "ai" | "rules" | null;
+  guardrailBlocks: number;
+  guardrailWarnings: number;
+  duplicateWebhooksSuppressed: number;
+  failedEvents: number;
+  warningEvents: number;
+  maxAttemptNumber: number | null;
+  hasSuccessfulOutcome: boolean;
+}
+
+/**
+ * Aggregates trust indicators straight from mapped timeline events - no
+ * extra queries. Operators see guardrail pressure, duplicate webhook noise
+ * and outcome health at a glance.
+ */
+export function extractTrustSignals(events: TimelineEvent[]): TimelineTrustSignals {
+  let decisionSource: TimelineTrustSignals["decisionSource"] = null;
+  let guardrailBlocks = 0;
+  let guardrailWarnings = 0;
+  let duplicateWebhooksSuppressed = 0;
+  let failedEvents = 0;
+  let warningEvents = 0;
+  let maxAttemptNumber: number | null = null;
+  let hasSuccessfulOutcome = false;
+
+  for (const event of events) {
+    if (event.kind === "decision" && event.decision?.source) {
+      // Later decide events override earlier ones (re-decisions).
+      decisionSource = event.decision.source;
+    }
+    if (event.kind === "guardrail") {
+      if (event.title === "Guardrail blocked action") guardrailBlocks += 1;
+      else guardrailWarnings += 1;
+    }
+    if (event.title === "Duplicate webhook suppressed") {
+      duplicateWebhooksSuppressed += 1;
+    }
+    if (event.status === "failure") failedEvents += 1;
+    if (event.status === "warning") warningEvents += 1;
+    if (
+      event.attemptNumber !== null &&
+      (maxAttemptNumber === null || event.attemptNumber > maxAttemptNumber)
+    ) {
+      maxAttemptNumber = event.attemptNumber;
+    }
+    if (event.title === "Customer paid via link") hasSuccessfulOutcome = true;
+  }
+
+  return {
+    decisionSource,
+    guardrailBlocks,
+    guardrailWarnings,
+    duplicateWebhooksSuppressed,
+    failedEvents,
+    warningEvents,
+    maxAttemptNumber,
+    hasSuccessfulOutcome,
+  };
 }
