@@ -130,8 +130,6 @@ export function buildRecoveryTimeline(rows: ActivityRow[]): TimelineEvent[] {
 
   return ordered.map((row) => {
     const details = row.details ?? {};
-    const event =
-      typeof details.event === "string" ? details.event : null;
 
     const detail =
       typeof details.reason === "string"

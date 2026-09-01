@@ -103,12 +103,6 @@ export default async function DashboardPage() {
 
   const { financial, operational, intelligence } = intel;
 
-  // Honest weekly trend: only shown when both windows have recovered revenue.
-  const trendLabel =
-    intel.weeklyTrend?.meaningful
-      ? `${intel.weeklyTrend.direction === "up" ? "+" : intel.weeklyTrend.direction === "down" ? "−" : "±"}${formatINRCompact(Math.abs(intel.weeklyTrend.deltaPaise))} vs prior week`
-      : "No trend yet - needs a second week of recoveries";
-
   return (
     <>
       <Header

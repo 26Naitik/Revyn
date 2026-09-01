@@ -83,15 +83,15 @@ describe("getAIConfig", () => {
   });
 
   it("defaults to the OpenAI provider with a default model", () => {
-    const config = getAIConfig({ AI_API_KEY: "sk-test-123" });
+    const config = getAIConfig({ AI_API_KEY: "sk-dummy-openai" });
     expect(config).not.toBeNull();
     expect(config!.provider).toBe("openai");
     expect(config!.model).toBe(DEFAULT_AI_MODELS.openai);
-    expect(config!.apiKey).toBe("sk-test-123");
+    expect(config!.apiKey).toBe("sk-dummy-openai");
   });
 
   it("infers Anthropic from the key prefix", () => {
-    const config = getAIConfig({ AI_API_KEY: "sk-ant-api03-xyz" });
+    const config = getAIConfig({ AI_API_KEY: "sk-ant-dummy-key" });
     expect(config!.provider).toBe("anthropic");
     expect(config!.model).toBe(DEFAULT_AI_MODELS.anthropic);
   });

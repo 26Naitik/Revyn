@@ -535,24 +535,23 @@ export async function handleRazorpayWebhook(
         };
     }
   } catch (err) {
-  console.error("========== RAZORPAY WEBHOOK ERROR ==========");
-  console.error(err);
-  console.error(
-    "Message:",
-    err instanceof Error ? err.message : String(err)
-  );
-  console.error(
-    "Stack:",
-    err instanceof Error ? err.stack : "No stack available"
-  );
-  console.error("============================================");
+    console.error("========== RAZORPAY WEBHOOK ERROR ==========");
+    console.error(err);
+    console.error(
+      "Message:",
+      err instanceof Error ? err.message : String(err)
+    );
+    console.error(
+      "Stack:",
+      err instanceof Error ? err.stack : "No stack available"
+    );
+    console.error("============================================");
 
-  return {
-    status: 500,
-    body: {
-      error: "webhook_processing_failed",
-      message: err instanceof Error ? err.message : String(err),
-    },
-  };
+    // Never echo internal error details to the caller - log them server-side
+    // only so Razorpay retries don't leak implementation details.
+    return {
+      status: 500,
+      body: { error: "webhook_processing_failed" },
+    };
   }
 }
